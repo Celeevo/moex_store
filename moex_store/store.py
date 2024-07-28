@@ -33,6 +33,8 @@ class MoexStore:
         self.wtf = write_to_file
         asyncio.run(self._check_connection())
 
+
+
     async def _check_connection(self):
         url = "https://iss.moex.com"
         try:
@@ -231,7 +233,7 @@ class MoexStore:
         return a * delta_months ** 2 + b * delta_months + c
 
     async def _run_progress_bar(self, duration, data_task):
-        with tqdm_asyncio(total=100, desc="Fetching market candles", leave=True, ncols=100,
+        with tqdm_asyncio(total=100, desc="Загружаю котировки:", leave=True, ncols=100,
                           bar_format='{l_bar}{bar}') as pbar:
             for _ in range(100):
                 if data_task.done():

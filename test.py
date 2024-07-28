@@ -10,7 +10,7 @@ def runstrat():
     cerebro.addstrategy(bt.Strategy)
     store = MoexStore(write_to_file=True)
     # data = store.get_data('EuM4', 'EuM4', "2024-03-15", "2024-05-29", '1m')
-    data = store.get_data('', 'AFLT', "2022-01-15", "2022-11-15", '1h')
+    data = store.get_data('', 'AFLT', "2022-01-15", "2022-11-15", '1m')
     # data = store.get_data('', 'NLMK', "2022-01-15", "2022-11-15", '1h')
     # data = store.get_data('', 'SIz3', "2022-01-15", "2022-11-15", '1h')
     cerebro.adddata(data)

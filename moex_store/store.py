@@ -9,8 +9,7 @@ import aiomoex
 from datetime import datetime
 from tqdm.asyncio import tqdm_asyncio
 from moex_store.tf import change_tf
-
-# import patch_aiohttp
+import moex_store.patch_aiohttp
 
 
 TF = OrderedDict({
@@ -29,23 +28,46 @@ TF = OrderedDict({
 
 class MoexStore:
     def __init__(self, write_to_file=True):
-        # Проверка соединения
         self.wtf = write_to_file
-        asyncio.run(self._check_connection())
+        self.loop = asyncio.get_event_loop()
+        self.loop.run_until_complete(self._check_connection())
 
-
-
-    async def _check_connection(self):
+    @staticmethod
+    async def _check_connection():
         url = "https://iss.moex.com"
         try:
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=10)  # Установка таймаута на 10 секунд
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url) as response:
                     if response.status == 200:
                         print("Биржа MOEX доступна для запросов")
                     else:
                         raise ConnectionError(f"Не удалось подключиться к MOEX: статус {response.status}")
+        except aiohttp.ClientError as e:
+            raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
+        except asyncio.TimeoutError:
+            raise ConnectionError("Не удалось подключиться к MOEX: запрос превысил время ожидания")
         except Exception as e:
             raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
+
+    # def __init__(self, write_to_file=True):
+    #     # Проверка соединения
+    #     self.wtf = write_to_file
+    #     asyncio.run(self._check_connection())
+    #
+    #
+    #
+    # async def _check_connection(self):
+    #     url = "https://iss.moex.com"
+    #     try:
+    #         async with aiohttp.ClientSession() as session:
+    #             async with session.get(url) as response:
+    #                 if response.status == 200:
+    #                     print("Биржа MOEX доступна для запросов")
+    #                 else:
+    #                     raise ConnectionError(f"Не удалось подключиться к MOEX: статус {response.status}")
+    #     except Exception as e:
+    #         raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
 
     def get_data(self, name, sec_id, fromdate, todate, tf):
         fromdate = self._parse_date(fromdate)
@@ -55,13 +77,14 @@ class MoexStore:
         self._validate_inputs(sec_id, fromdate, todate, tf)
 
         # Получение данных
-        moex_data = asyncio.run(self._get_candles_history(sec_id, fromdate, todate, TF[tf]))
+        moex_data = asyncio.run(self._get_candles_history(sec_id, fromdate, todate, tf))
         # Готовим итоговый пандас дата-фрейм для backtrader.cerebro
         moex_df = self.make_df(moex_data, tf, self.market)  # формируем файл с историей
         data = bt.feeds.PandasData(name=name, dataname=moex_df)
         return data
 
-    def _parse_date(self, date_input):
+    @staticmethod
+    def _parse_date(date_input):
         if isinstance(date_input, datetime):
             return date_input
         elif isinstance(date_input, str):
@@ -117,7 +140,8 @@ class MoexStore:
         if not (valid_begin <= fromdate <= valid_end):
             raise ValueError(f"fromdate ({fromdate}) должен быть между {valid_begin} и {valid_end}")
 
-    async def get_instrument_info(self, secid):
+    @staticmethod
+    async def get_instrument_info(secid):
         async with aiohttp.ClientSession() as session:
             url = f"https://iss.moex.com/iss/securities/{secid}.json"
             async with session.get(url) as response:
@@ -138,7 +162,8 @@ class MoexStore:
                 else:
                     return None
 
-    async def get_history_intervals(self, sec_id, board, market, engine):
+    @staticmethod
+    async def get_history_intervals(sec_id, board, market, engine):
         async with aiohttp.ClientSession() as session:
             data = await aiomoex.get_market_candle_borders(session, security=sec_id, market=market, engine=engine)
             if data:
@@ -152,8 +177,11 @@ class MoexStore:
             return None
 
     async def _get_candles_history(self, sec_id, fromdate, todate, tf):
+        delta = (todate - fromdate).days
         start = fromdate.strftime('%Y-%m-%d %H:%M:%S')
         end = todate.strftime('%Y-%m-%d %H:%M:%S')
+        key_tf = tf
+        tf = TF[tf]
 
         if tf in (5, 15, 30):
             resample_tf_value = tf
@@ -162,32 +190,38 @@ class MoexStore:
             resample_tf_value = None
 
         async with aiohttp.ClientSession() as session:
-            estimated_time = self.get_estimated_time(fromdate, todate, tf)
-            # pbar_task = asyncio.create_task(self._run_progress_bar(estimated_time))
-            # data_task = aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end,
-            #                                        market=self.market, engine=self.engine)
-
-            data_task = asyncio.create_task(
-                aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end, market=self.market,
-                                           engine=self.engine))
-            pbar_task = asyncio.create_task(self._run_progress_bar(estimated_time, data_task))
-
             start_time = time.time()
-            data = await data_task
+            if tf in (1, 10, 60, 24):
+                estimated_time = self.get_estimated_time(delta, tf)
+                data_task = asyncio.create_task(
+                    aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end, market=self.market,
+                                               engine=self.engine))
+                pbar_task = asyncio.create_task(
+                    self._run_progress_bar(estimated_time, data_task))
+
+                data = await data_task
+
+                await pbar_task
+            else:
+                print(f'Загружаю котировки ...')
+                data = await aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end,
+                                                        market=self.market, engine=self.engine)
+
+            # with open("output.txt", "a") as file:
+            #     file.write(f'{tf = }, {delta = }, elapsed_time = {elapsed_time:.2f}' + "\n")
+
             end_time = time.time()
             elapsed_time = end_time - start_time
-
-            await pbar_task
-
-            # data = await aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end, market=self.market, engine=self.engine)
             if data:
-                print(f'История котировок для {sec_id} получена с {tf = } за {elapsed_time:.2f} секунды')
+                print(f'История котировок {sec_id} c {fromdate.strftime("%Y-%m-%d")} по {todate.strftime("%Y-%m-%d")} '
+                      f'на тайм-фрейме "{key_tf}" получена за {elapsed_time:.2f} секунды')
             else:
-                data = await aiomoex.get_board_candles(session, sec_id, interval=tf, start=start, end=end, board=self.board, market=self.market, engine=self.engine)
+                data = await aiomoex.get_board_candles(session, sec_id, interval=tf, start=start, end=end,
+                                                       board=self.board, market=self.market, engine=self.engine)
                 if data:
-                    print(f'История котировок для {sec_id} получена с {tf = }')
+                    print(f'История котировок для {sec_id} получена с тайм-фреймом {key_tf}')
                 else:
-                    print(f'История котировок для {sec_id} с {tf = } не найдена на бирже')
+                    print(f'История котировок для {sec_id} с тайм-фреймом  {key_tf} не найдена на бирже')
                     return None
 
             if resample_tf_value:
@@ -217,23 +251,24 @@ class MoexStore:
             if not os.path.exists(directory):
                 os.makedirs(directory)
             df.to_csv(csv_file_path, sep=',', index=True, header=True)
-            print(f'Котировки для {self.sec_id} записаны в файл "{csv_file_path}"')
+            print(f'Котировки записаны в файл "{csv_file_path}"')
 
         return df
 
-    def get_estimated_time(self, fromdate, todate, tf):
-        delta_days = (todate - fromdate).days
-        delta_months = delta_days / 30
-        if tf in [1, 5, 15, 30]:
-            a, b, c = 0.45, 6.68, 1.59
+    @staticmethod
+    def get_estimated_time(delta, tf):
+        a, b, c = 0, 0, 0
+        if tf == 1:
+            a, b, c = 0.0003295019925172705, 0.04689869997675399, 6.337785868761401
         elif tf == 10:
-            a, b, c = 0.07, 0.43, 1.5
-        elif tf in [60, 24, 7, 31, 4]:
-            a, b, c = 0.1, 0.4, 0.9
-        return a * delta_months ** 2 + b * delta_months + c
+            a, b, c = 4.988531246349836e-06, 0.012451095862652674, 0.48478245834903433
+        elif tf in [60, 24]:
+            a, b, c = - 1.4234264995077613e-07, 0.0024511947309111748, 0.5573157754716476
+        return a * delta ** 2 + b * delta + c
 
-    async def _run_progress_bar(self, duration, data_task):
-        with tqdm_asyncio(total=100, desc="Загружаю котировки:", leave=True, ncols=100,
+    @staticmethod
+    async def _run_progress_bar(duration, data_task):
+        with tqdm_asyncio(total=100, desc="Загружаю котировки", leave=True, ncols=100,
                           bar_format='{l_bar}{bar}') as pbar:
             for _ in range(100):
                 if data_task.done():
@@ -242,6 +277,3 @@ class MoexStore:
                     break
                 await asyncio.sleep(duration / 100)
                 pbar.update(1)
-
-
-

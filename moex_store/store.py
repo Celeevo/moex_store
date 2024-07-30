@@ -43,7 +43,6 @@ class MoexStore:
             except Exception as e:
                 raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
 
-
     def get_data(self, name, sec_id, fromdate, todate, tf):
         fromdate = self._parse_date(fromdate)
         todate = self._parse_date(todate)

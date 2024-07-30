@@ -4,6 +4,7 @@ import backtrader as bt
 from datetime import datetime
 from moex_store import MoexStore
 
+
 def runstrat():
     cerebro = bt.Cerebro(stdstats=False)
     cerebro.addstrategy(bt.Strategy)

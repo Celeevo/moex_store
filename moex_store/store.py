@@ -15,7 +15,7 @@ TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w
 
 
 class MoexStore:
-    def __init__(self, write_to_file=True, max_retries=5, retry_delay=2):
+    def __init__(self, write_to_file=True, max_retries=3, retry_delay=2):
         self.wtf = write_to_file
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -23,28 +23,25 @@ class MoexStore:
         self.loop.run_until_complete(self._check_connection())
 
     async def _check_connection(self):
-        # url = "https://iss.moex.com"
-        url = "https://iss.moex.com/iss/engines.xml"
+        url = f"https://iss.moex.com/iss/engines.json"
         attempts = 0
         while attempts < self.max_retries:
             try:
-                # timeout = aiohttp.ClientTimeout(total=10)  # Установка таймаута на 10 секунд, timeout=timeout
-                async with aiohttp.ClientSession(trust_env=True) as session:
-                    async with session.get(url, ssl=False) as response:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        _ = await response.json()
                         if response.status == 200:
                             print("Биржа MOEX доступна для запросов")
                             return
                         else:
                             raise ConnectionError(f"Не удалось подключиться к MOEX: статус {response.status}")
-            except aiohttp.ClientError as e:  # , asyncio.TimeoutError
+            except aiohttp.ClientError as e:
                 print(f"Попытка {attempts + 1}: Не удалось подключиться к MOEX: {e}")
                 attempts += 1
                 if attempts < self.max_retries:
                     time.sleep(self.retry_delay)
             except Exception as e:
                 raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
-
-        raise ConnectionError(f"Не удалось подключиться к MOEX после {self.max_retries} попыток")
 
 
     def get_data(self, name, sec_id, fromdate, todate, tf):

@@ -9,14 +9,14 @@ class TestMoexStore(unittest.TestCase):
 
     def test_check_connection_success(self):
         with aioresponses() as m:
-            m.get('https://iss.moex.com', status=200)
+            m.get('https://iss.moex.com/iss/engines.xml', status=200)
 
             store = MoexStore(write_to_file=True)
             self.assertTrue(store.wtf)
 
     def test_check_connection_failure_status(self):
         with aioresponses() as m:
-            m.get('https://iss.moex.com', status=500)
+            m.get('https://iss.moex.com/iss/engines.xml', status=500)
 
             with self.assertRaises(ConnectionError):
                 MoexStore(write_to_file=True)

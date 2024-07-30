@@ -1,4 +1,3 @@
-from collections import OrderedDict
 import os
 import time
 import pandas as pd
@@ -12,62 +11,41 @@ from moex_store.tf import change_tf
 import moex_store.patch_aiohttp
 
 
-TF = OrderedDict({
-    '1m': 1,
-    '5m': 5,
-    '10m': 10,
-    '15m': 15,
-    '30m': 30,
-    '1h': 60,
-    '1d': 24,
-    '1w': 7,
-    '1M': 31,
-    '1q': 4
-})
+TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
 
 class MoexStore:
-    def __init__(self, write_to_file=True):
+    def __init__(self, write_to_file=True, max_retries=5, retry_delay=2):
         self.wtf = write_to_file
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         self.loop = asyncio.get_event_loop()
         self.loop.run_until_complete(self._check_connection())
 
-    @staticmethod
-    async def _check_connection():
-        url = "https://iss.moex.com"
-        try:
-            timeout = aiohttp.ClientTimeout(total=10)  # Установка таймаута на 10 секунд
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        print("Биржа MOEX доступна для запросов")
-                    else:
-                        raise ConnectionError(f"Не удалось подключиться к MOEX: статус {response.status}")
-        except aiohttp.ClientError as e:
-            raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
-        except asyncio.TimeoutError:
-            raise ConnectionError("Не удалось подключиться к MOEX: запрос превысил время ожидания")
-        except Exception as e:
-            raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
+    async def _check_connection(self):
+        # url = "https://iss.moex.com"
+        url = "https://iss.moex.com/iss/engines.xml"
+        attempts = 0
+        while attempts < self.max_retries:
+            try:
+                # timeout = aiohttp.ClientTimeout(total=10)  # Установка таймаута на 10 секунд, timeout=timeout
+                async with aiohttp.ClientSession(trust_env=True) as session:
+                    async with session.get(url, ssl=False) as response:
+                        if response.status == 200:
+                            print("Биржа MOEX доступна для запросов")
+                            return
+                        else:
+                            raise ConnectionError(f"Не удалось подключиться к MOEX: статус {response.status}")
+            except aiohttp.ClientError as e:  # , asyncio.TimeoutError
+                print(f"Попытка {attempts + 1}: Не удалось подключиться к MOEX: {e}")
+                attempts += 1
+                if attempts < self.max_retries:
+                    time.sleep(self.retry_delay)
+            except Exception as e:
+                raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
 
-    # def __init__(self, write_to_file=True):
-    #     # Проверка соединения
-    #     self.wtf = write_to_file
-    #     asyncio.run(self._check_connection())
-    #
-    #
-    #
-    # async def _check_connection(self):
-    #     url = "https://iss.moex.com"
-    #     try:
-    #         async with aiohttp.ClientSession() as session:
-    #             async with session.get(url) as response:
-    #                 if response.status == 200:
-    #                     print("Биржа MOEX доступна для запросов")
-    #                 else:
-    #                     raise ConnectionError(f"Не удалось подключиться к MOEX: статус {response.status}")
-    #     except Exception as e:
-    #         raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
+        raise ConnectionError(f"Не удалось подключиться к MOEX после {self.max_retries} попыток")
+
 
     def get_data(self, name, sec_id, fromdate, todate, tf):
         fromdate = self._parse_date(fromdate)
@@ -78,7 +56,7 @@ class MoexStore:
 
         # Получение данных
         moex_data = asyncio.run(self._get_candles_history(sec_id, fromdate, todate, tf))
-        # Готовим итоговый пандас дата-фрейм для backtrader.cerebro
+        # Готовим итоговый дата-фрейм для backtrader.cerebro
         moex_df = self.make_df(moex_data, tf, self.market)  # формируем файл с историей
         data = bt.feeds.PandasData(name=name, dataname=moex_df)
         return data
@@ -193,6 +171,8 @@ class MoexStore:
             start_time = time.time()
             if tf in (1, 10, 60, 24):
                 estimated_time = self.get_estimated_time(delta, tf)
+                print(f'Ожидаемое время загрузки данных (зависит от загрузки серверов MOEX): {estimated_time:.0f} сек.')
+                time.sleep(0.1)
                 data_task = asyncio.create_task(
                     aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end, market=self.market,
                                                engine=self.engine))

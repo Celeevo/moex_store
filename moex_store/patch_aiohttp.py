@@ -6,7 +6,7 @@ import asyncio
 from moex_store.dns_client import DNS_ISSClient
 
 print(f'OS = {platform.system()}')
-if platform.system() != "Windows":  #  != "Windows"
+if platform.system() != "Windows":
     # Создаем SSL-контекст с отключенной проверкой сертификатов
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
@@ -24,7 +24,7 @@ if platform.system() != "Windows":  #  != "Windows"
 
     aiohttp.ClientSession.__init__ = _patched_init
 
-    # aiomoex.client.ISSClient = DNS_ISSClient
 else:
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    aiomoex.client.ISSClient = DNS_ISSClient
+
+aiomoex.client.ISSClient = DNS_ISSClient

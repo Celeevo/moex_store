@@ -1,17 +1,11 @@
-"""Асинхронный клиент для MOEX ISS."""
-from collections.abc import AsyncIterable, AsyncIterator
-from typing import cast
-from datetime import datetime
-
 import aiohttp
 from aiohttp import client_exceptions
-import asyncio
 import socket
-from aiomoex.client import ISSClient, ISSMoexError, Table, TablesDict, WebQuery
+from aiomoex.client import ISSClient, ISSMoexError, TablesDict
 
 
 class DNS_ISSClient(ISSClient):
-    async def get(self, start: int | None = None) -> TablesDict:
+    async def get(self, start=None):
         """Загрузка данных.
 
         :param start:

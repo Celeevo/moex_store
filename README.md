@@ -66,7 +66,7 @@
 
        Допустимые форматы для `fromdate` и `todate`:
        - datetime (`datetime.datetime(2023, 1, 1)`).
-       - строка в форматах `'YYYY-MM-DD'` или `'DD-MM-YYYY'`, как в примере выше.
+       - строка в формате `'YYYY-MM-DD'` или `'DD-MM-YYYY'`, как в примере выше.
 
    - `tf` - тайм-фрейм котировки. Допустимые значения:
 
@@ -82,7 +82,7 @@
       - `1q`: квартал
 
    Метод `get_data` возвращает объект [feeds.PandasData](https://www.backtrader.ru/docu/datafeed/datafeed_pandas/) 
-   экосистемы _backtrader_, поэтому его можно сразу подгружать в cerebro.
+   экосистемы _backtrader_, поэтому его можно сразу подгружать в `cerebro`.
 
 
 4. Добавление Источника данных в движок [cerebro](https://www.backtrader.ru/docu/cerebro/cerebro/) осуществляется 
@@ -118,7 +118,7 @@ if __name__ == '__main__':
 
 Вывод покажет загруженный Источник данных:
 
-![aflt2023.png](pict1.png)
+![pict1.png](pict1.png)
 
 Экземпляр Хранилища `store` позволяет осуществлять загрузку нескольких источников данных:
 
@@ -150,7 +150,7 @@ if __name__ == '__main__':
 
 Источники данных, добавленные в `cerebro`:
 
-![gazp.png](pict2.png)
+![pict2.png](pict2.png)
 
 
 

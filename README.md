@@ -15,7 +15,7 @@
 
 ## Установка
 
-   ```pip install moex_store```
+   ```pip install moex-store```
 
 Установит библиотеку и все необходимые зависимости.
 

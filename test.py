@@ -10,10 +10,12 @@ def runstrat():
     cerebro.addstrategy(bt.Strategy)
 
     store = MoexStore(write_to_file=True)
-    tf = '1d'
+    fd = "13-12-2023"
+    td = '15-03-2024'
+    tf='15m'
     today = datetime.today()
-    for tiker in ('GAZP', 'NLMK', 'SIH4'):
-        data = store.get_data(f'{tiker}_{tf}', tiker, '01-01-2023', today, tf)
+    for tiker in ('SiM4', 'EuH4', 'RiH4'):
+        data = store.get_data(f'{tiker}_{tf}', tiker, fd, td, tf)
         cerebro.adddata(data)
 
     cerebro.run()

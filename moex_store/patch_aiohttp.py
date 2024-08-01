@@ -5,7 +5,7 @@ import aiomoex
 import asyncio
 from moex_store.dns_client import DNS_ISSClient
 
-print(f'OS = {platform.system()}')
+# print(f'OS = {platform.system()}')
 if platform.system() != "Windows":
     # Создаем SSL-контекст с отключенной проверкой сертификатов
     ssl_context = ssl.create_default_context()

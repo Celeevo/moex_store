@@ -118,7 +118,7 @@ if __name__ == '__main__':
 
 Вывод покажет загруженный Источник данных:
 
-![pict1.png](https://github.com/Celeevo/moex_store/blob/master/pict1.png)
+![pict1.png](https://github.com/Celeevo/moex_store/blob/master/pict1.png?raw=true)
 
 Экземпляр Хранилища `store` позволяет осуществлять загрузку нескольких источников данных:
 
@@ -150,7 +150,7 @@ if __name__ == '__main__':
 
 Источники данных, добавленные в `cerebro`:
 
-![pict2.png](https://github.com/Celeevo/moex_store/blob/master/pict2.png)
+![pict2.png](https://github.com/Celeevo/moex_store/blob/master/pict2.png?raw=true)
 
 
 

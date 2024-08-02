@@ -25,8 +25,13 @@ class DNS_ISSClient(ISSClient):
         for dns_server in ['77.88.8.1', '8.8.8.8']:
             connector = None
             try:
+                # import ssl  # start
+                # ssl_context = ssl.create_default_context()
+                # ssl_context.check_hostname = False
+                # ssl_context.verify_mode = ssl.CERT_NONE  # end
+
                 resolver = aiohttp.resolver.AsyncResolver(nameservers=[dns_server])
-                connector = aiohttp.TCPConnector(resolver=resolver)
+                connector = aiohttp.TCPConnector(resolver=resolver)  # , ssl=ssl_context
                 self._session._connector = connector
                 async with self._session.get(url, params=query) as response:
                     try:

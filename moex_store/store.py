@@ -19,8 +19,9 @@ class MoexStore:
         self.wtf = write_to_file
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self.loop = asyncio.get_event_loop()
-        self.loop.run_until_complete(self._check_connection())
+        # self.loop = asyncio.get_event_loop()
+        # self.loop.run_until_complete(self._check_connection())
+        asyncio.run(self._check_connection())
 
     async def _check_connection(self):
         url = f"https://iss.moex.com/iss/engines.json"

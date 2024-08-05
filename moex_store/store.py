@@ -9,6 +9,9 @@ from datetime import datetime
 from tqdm.asyncio import tqdm_asyncio
 from moex_store.tf import change_tf
 import moex_store.patch_aiohttp
+import ssl
+from aiohttp.client_exceptions import ClientConnectorCertificateError
+from ssl import SSLCertVerificationError
 
 
 TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
@@ -19,13 +22,30 @@ class MoexStore:
         self.wtf = write_to_file
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        # self.loop = asyncio.get_event_loop()
-        # self.loop.run_until_complete(self._check_connection())
+        self.ssl_context = None
         asyncio.run(self._check_connection())
+
+    def apply_ssl_patch(self):
+        # Создаем SSL-контекст с отключенной проверкой сертификатов
+        self.ssl_context = ssl.create_default_context()
+        self.ssl_context.check_hostname = False
+        self.ssl_context.verify_mode = ssl.CERT_NONE
+
+        # Переопределяем оригинальный метод ClientSession
+        _original_init = aiohttp.ClientSession.__init__
+
+        def _patched_init(self, *args, **kwargs):
+            if 'connector' not in kwargs:
+                kwargs['connector'] = aiohttp.TCPConnector(ssl=self.ssl_context)
+            _original_init(self, *args, **kwargs)
+
+        aiohttp.ClientSession.__init__ = _patched_init
 
     async def _check_connection(self):
         url = f"https://iss.moex.com/iss/engines.json"
         attempts = 0
+        ssl_patched = False
+
         while attempts < self.max_retries:
             try:
                 async with aiohttp.ClientSession() as session:
@@ -36,6 +56,24 @@ class MoexStore:
                             return
                         else:
                             raise ConnectionError(f"Не удалось подключиться к MOEX: статус {response.status}")
+            except (ClientConnectorCertificateError, SSLCertVerificationError) as e:
+                if not ssl_patched:
+                    print(f"SSL verification failed: {e}")
+                    print(f'Похоже вы запускаете приложение на Мак ОС, но не воспользовались рекомендацией по '
+                          f'установке сертификатов при инсталляции Python, типа: "Congratulations! Python 3.9.0 '
+                          f'for macOS 10.9 or later  was successfully installed. One more thing: to verify '
+                          f'the identity of secure network connections, this Python needs a set of SSL root '
+                          f'certificates. You can download and install a current curated set from the Certifi '
+                          f'project by double-clicking on the Install Certificates icon in the Finder window. '
+                          f'See the ReadMe file for more information."')
+
+                    self.apply_ssl_patch()
+                    ssl_patched = True  # патч применен
+                else:
+                    print(f"Попытка {attempts + 1} с отключенной проверкой SSL не удалась: {e}")
+                    attempts += 1
+                    if attempts < self.max_retries:
+                        time.sleep(self.retry_delay)
             except aiohttp.ClientError as e:
                 print(f"Попытка {attempts + 1}: Не удалось подключиться к MOEX: {e}")
                 attempts += 1

@@ -14,7 +14,7 @@ def runstrat():
     td = '15-03-2024'
     tf='15m'
     today = datetime.today()
-    for tiker in ('SiM4', 'EuH4', 'RiH4'):
+    for tiker in ('SiM4', 'RIH4_2014', 'RiH4'):
         data = store.get_data(f'{tiker}_{tf}', tiker, fd, td, tf)
         cerebro.adddata(data)
 

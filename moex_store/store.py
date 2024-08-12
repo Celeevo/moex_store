@@ -13,7 +13,6 @@ import ssl
 from aiohttp.client_exceptions import ClientConnectorCertificateError
 from ssl import SSLCertVerificationError
 
-
 TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
 
@@ -22,6 +21,7 @@ class MoexStore:
         self.wtf = write_to_file
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.sec_details = {}
         # self.ssl_context = None
         asyncio.run(self._check_connection())
 
@@ -94,7 +94,7 @@ class MoexStore:
         # Получение данных
         moex_data = asyncio.run(self._get_candles_history(sec_id, fromdate, todate, tf))
         # Готовим итоговый дата-фрейм для backtrader.cerebro
-        moex_df = self.make_df(moex_data, tf, self.market)  # формируем файл с историей
+        moex_df = self.make_df(moex_data, tf, self.sec_details[sec_id]['market'], sec_id)  # формируем файл с историей
         data = bt.feeds.PandasData(name=name, dataname=moex_df)
         return data
 
@@ -124,16 +124,24 @@ class MoexStore:
                 f"Тайм-фрейм для {sec_id} должен быть одним из списка: {list(TF.keys())}, получили: {tf = }")
 
         # Проверка get_instrument_info
-        instrument_info = asyncio.run(self.get_instrument_info(sec_id))
-        if instrument_info is None:
+        sec_info = asyncio.run(self.get_instrument_info(sec_id))
+        if sec_info[-1] is None:
             raise ValueError(f"Инструмент с sec_id {sec_id} не найден на Бирже")
         print(f'Инструмент {sec_id} найден на Бирже')
-        self.board, self.market, self.engine = instrument_info
-        if self.wtf:
-            self.sec_id = sec_id
+        self.sec_details[sec_id] = dict(
+            sectype=sec_info[0],
+            grouptype=sec_info[1],
+            assetcode=sec_info[2],
+            board=sec_info[3],
+            market=sec_info[4],
+            engine=sec_info[5]
+        )
+        # self.board, self.market, self.engine = sec_info
 
         # Проверка get_history_intervals
-        interval_data = asyncio.run(self.get_history_intervals(sec_id, self.board, self.market, self.engine))
+        interval_data = asyncio.run(self.get_history_intervals(sec_id, self.sec_details[sec_id]['board'],
+                                                               self.sec_details[sec_id]['market'],
+                                                               self.sec_details[sec_id]['engine']))
         if interval_data is None:
             raise ValueError(f"Нет доступных интервалов для sec_id {sec_id}")
 
@@ -155,17 +163,28 @@ class MoexStore:
         if not (valid_begin <= fromdate <= valid_end):
             raise ValueError(f"fromdate ({fromdate}) должен быть между {valid_begin} и {valid_end}")
 
-    @staticmethod
-    async def get_instrument_info(secid):
+    # @staticmethod
+    async def get_instrument_info(self, secid):
         async with aiohttp.ClientSession() as session:
             url = f"https://iss.moex.com/iss/securities/{secid}.json"
+            # https://iss.moex.com/iss/securities/GZU4.json
+            # https://iss.moex.com/iss/statistics/engines/futures/markets/forts/series.json?asset_code=rts&show_expired=1
             async with session.get(url) as response:
                 data = await response.json()
+
+                sectype, grouptype, assetcode, board, market, engine = None, None, None, None, None, None
+
+                if 'description' in data and 'data' in data['description'] and data['description']['data']:
+                    description_dict = {item[0]: item[2] for item in data['description']['data']}
+                    sectype = description_dict.get("TYPE")
+                    grouptype = description_dict.get("GROUPTYPE")
+                    assetcode = description_dict.get("ASSETCODE")  # if sectype == "futures" else None
 
                 if 'boards' in data and 'data' in data['boards'] and data['boards']['data']:
                     boards_data = data['boards']['data']
                     columns = data['boards']['columns']
 
+                    # Ищем в data['boards']['data'] строку с is_primary = 1 (это главная доска инструмента)
                     primary_boards = filter(lambda item: dict(zip(columns, item)).get('is_primary') == 1, boards_data)
 
                     for item in primary_boards:
@@ -173,9 +192,8 @@ class MoexStore:
                         board = record.get('boardid')
                         market = record.get('market')
                         engine = record.get('engine')
-                        return board, market, engine
-                else:
-                    return None
+
+                return sectype, grouptype, assetcode, board, market, engine
 
     @staticmethod
     async def get_history_intervals(sec_id, board, market, engine):
@@ -211,8 +229,9 @@ class MoexStore:
                 print(f'Ожидаемое время загрузки данных (зависит от загрузки серверов MOEX): {estimated_time:.0f} сек.')
                 time.sleep(0.1)
                 data_task = asyncio.create_task(
-                    aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end, market=self.market,
-                                               engine=self.engine))
+                    aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end,
+                                               market=self.sec_details[sec_id]['market'],
+                                               engine=self.sec_details[sec_id]['engine']))
                 pbar_task = asyncio.create_task(
                     self._run_progress_bar(estimated_time, data_task))
 
@@ -222,7 +241,8 @@ class MoexStore:
             else:
                 print(f'Загружаю котировки ...')
                 data = await aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end,
-                                                        market=self.market, engine=self.engine)
+                                                        market=self.sec_details[sec_id]['market'],
+                                                        engine=self.sec_details[sec_id]['engine'])
 
             # with open("output.txt", "a") as file:
             #     file.write(f'{tf = }, {delta = }, elapsed_time = {elapsed_time:.2f}' + "\n")
@@ -234,7 +254,9 @@ class MoexStore:
                       f'на тайм-фрейме "{key_tf}" получена за {elapsed_time:.2f} секунды')
             else:
                 data = await aiomoex.get_board_candles(session, sec_id, interval=tf, start=start, end=end,
-                                                       board=self.board, market=self.market, engine=self.engine)
+                                                       board=self.sec_details[sec_id]['board'],
+                                                       market=self.sec_details[sec_id]['market'],
+                                                       engine=self.sec_details[sec_id]['engine'])
                 if data:
                     print(f'История котировок для {sec_id} получена с тайм-фреймом {key_tf}')
                 else:
@@ -248,7 +270,7 @@ class MoexStore:
 
             return data
 
-    def make_df(self, data, tf, market):
+    def make_df(self, data, tf, market, sec_id):
         df = pd.DataFrame(data)
         if market == 'index':
             if 'volume' in df.columns:
@@ -263,7 +285,7 @@ class MoexStore:
         df.set_index('datetime', inplace=True)
 
         if self.wtf:
-            csv_file_path = f"files_from_moex/{self.sec_id}_tf-{tf}.csv"
+            csv_file_path = f"files_from_moex/{sec_id}_tf-{tf}.csv"
             directory = os.path.dirname(csv_file_path)
             if not os.path.exists(directory):
                 os.makedirs(directory)

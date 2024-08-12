@@ -168,6 +168,7 @@ class MoexStore:
         async with aiohttp.ClientSession() as session:
             url = f"https://iss.moex.com/iss/securities/{secid}.json"
             # https://iss.moex.com/iss/securities/GZU4.json
+            # https://iss.moex.com/iss/engines/futures/markets/forts/securities/RIU4.json
             # https://iss.moex.com/iss/statistics/engines/futures/markets/forts/series.json?asset_code=rts&show_expired=1
             async with session.get(url) as response:
                 data = await response.json()

@@ -66,7 +66,7 @@ class MoexStore:
                           f'certificates. You can download and install a current curated set from the Certifi '
                           f'project by double-clicking on the Install Certificates icon in the Finder window. '
                           f'See the ReadMe file for more information."')
-                    print("Ищите и запускайте файл 'Install Certificates.command' в папке Python 3.XX. Пока пробую"
+                    print("Ищите и запускайте файл 'Install Certificates.command' в папке Python 3.XX. Пока пробую "
                           "отключить проверку сертификатов.")
 
                     self.apply_ssl_patch()

@@ -1,3 +1,6 @@
 /.venv/
 .idea/
 venv/
+/files_from_moex/
+/dist/
+/moex_store.egg-info/

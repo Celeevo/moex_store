@@ -1,0 +1,224 @@
+Metadata-Version: 2.1
+Name: moex_store
+Version: 0.0.4
+Summary: MOEX Store for Backtrader
+Author-email: Celeevo <admin@backtrader.ru>
+License: Copyright (c) 2018 The Python Packaging Authority
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+Project-URL: Homepage, https://github.com/Celeevo/moex_store
+Project-URL: Issues, https://github.com/Celeevo/moex_store/issues
+Keywords: backtrader,moex,backtesting,datafeed,store,cerebro
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: aiodns==3.2.0
+Requires-Dist: aiohttp==3.9.5
+Requires-Dist: aiomoex==2.1.2
+Requires-Dist: aioresponses==0.7.6
+Requires-Dist: aiosignal==1.3.1
+Requires-Dist: attrs==23.2.0
+Requires-Dist: backtrader==1.9.78.123
+Requires-Dist: cffi==1.16.0
+Requires-Dist: colorama==0.4.6
+Requires-Dist: contourpy==1.2.1
+Requires-Dist: cycler==0.12.1
+Requires-Dist: fonttools==4.53.1
+Requires-Dist: frozenlist==1.4.1
+Requires-Dist: idna==3.7
+Requires-Dist: kiwisolver==1.4.5
+Requires-Dist: matplotlib==3.8.4
+Requires-Dist: multidict==6.0.5
+Requires-Dist: numpy==2.0.1
+Requires-Dist: packaging==24.1
+Requires-Dist: pandas==2.2.2
+Requires-Dist: pillow==10.4.0
+Requires-Dist: pycares==4.4.0
+Requires-Dist: pycparser==2.22
+Requires-Dist: pyparsing==3.1.2
+Requires-Dist: python-dateutil==2.9.0.post0
+Requires-Dist: pytz==2024.1
+Requires-Dist: six==1.16.0
+Requires-Dist: tqdm==4.66.4
+Requires-Dist: tzdata==2024.1
+Requires-Dist: yarl==1.9.4
+
+# Хранилище (Store) Источников данных Московской биржи MOEX для Backtrader.
+
+Содержание:
+1. [Назначение](#назначение)
+2. [Установка](#установка)
+3. [Применение в Backtrader](#применение-в-backtrader)
+
+
+## Назначение
+
+Позволяет осуществить загрузку исторических котировок по инструментам Московской Бирже MOEX с 
+информационного сервера биржи iss.moex.com прямо из кода тестирования вашей стратегии в [_backtrader_](https://www.backtrader.ru/). Не требует предварительной регистрации и аутентификации при запросе данных.
+Больше не нужно искать данные по историческим котировкам в открытых источниках, сохранять их в файлы и регулярно 
+обновлять. 
+
+## Установка
+
+   ```pip install moex-store```
+
+Установит библиотеку и все необходимые зависимости.
+
+## Применение в Backtrader
+
+1. Импортируйте класс Хранилища `MoexStore` из библиотеки `moex_store` в скрипте, где вы инициализируете `cerebro`.
+   
+   ```python
+   from moex_store import MoexStore
+   
+   ...
+   ```
+   
+2. Создайте экземпляр Хранилища, сохраните его в переменную.
+
+   ```python
+   store = MoexStore()
+   ```
+   
+   Хранилище имеет один устанавливаемый пользователем атрибут `write_to_file` (по умолчанию True), управляющий записью 
+   полученных с Биржи котировок на диск в файл `csv` для их визуальной проверки. Запись осуществляется в подпапку 
+   `files_from_moex`, создаваемую в папке, где лежит ваш скрипт стратегии. Если запись файлов не требуется, установите 
+   этот атрибут в False при создании Хранилища:  
+
+   ```python
+   store = MoexStore(write_to_file=False)
+   ```
+   
+3. Получение котировок осуществляется вызовом метода `get_data` экземпляра Хранилища `store`. На примере акций Аэрофлота 
+   (тикер на бирже `AFLT`), сохраняем исторические котировки с тайм-фреймом 1 минута с 01 января 2023 по 01 января 2024 
+   года в источник данных (DataFeed) `data`, присваивая ему имя `aflt`:
+
+   ```python
+   data = store.get_data(name='aflt', sec_id='AFLT', fromdate='01-01-2023', todate='01-01-2024', tf='1m')
+   ```
+   
+   Все аргументы метода `get_data` являются обязательными:
+
+   - `name` - имя источника данных, необходимо для отображения данных на графиках `cerebro.plot()`, а также для 
+   иных внутренних нужд пользователя _backtrader_, например, при установке комиссий брокера/биржи по конкретному 
+   источнику данных с помощью `cerebro.broker.setcommission()`
+
+   - `sec_id` - тикер инструмента Мосбиржи ([Код инструмента в торговой системе](https://www.moex.com/ru/spot/issues.aspx)).
+
+   - `fromdate` - дата, с которой будут загружаться котировки.
+
+   - `todate` - дата, по которую будут загружаться котировки.
+
+       Допустимые форматы для `fromdate` и `todate`:
+       - datetime (`datetime.datetime(2023, 1, 1)`).
+       - строка в формате `'YYYY-MM-DD'` или `'DD-MM-YYYY'`, как в примере выше.
+
+   - `tf` - тайм-фрейм котировки. Допустимые значения:
+
+      - `1m`: 1 минута, 
+      - `5m`: 5 минут, 
+      - `10m`: 10 минут, 
+      - `15m`: 15 минут, 
+      - `30m`: 30 минут, 
+      - `1h`: 60 минут, 
+      - `1d`: день, 
+      - `1w`: неделя, 
+      - `1M`: месяц, 
+      - `1q`: квартал
+
+   Метод `get_data` возвращает объект [feeds.PandasData](https://www.backtrader.ru/docu/datafeed/datafeed_pandas/) 
+   экосистемы _backtrader_, поэтому его можно сразу подгружать в `cerebro`.
+
+
+4. Добавление Источника данных в движок [cerebro](https://www.backtrader.ru/docu/cerebro/cerebro/) осуществляется 
+стандартно:
+
+   ```python
+   cerebro.adddata(data)
+   ```
+
+Полный код примера:
+
+```python
+from __future__ import (absolute_import, division, print_function,
+                    unicode_literals)
+import backtrader as bt
+from moex_store import MoexStore
+
+def runstrat():
+    cerebro = bt.Cerebro(stdstats=False)
+    cerebro.addstrategy(bt.Strategy)
+
+    store = MoexStore()
+    data = store.get_data(f"aflt-2023-hour", "AFLT", "01-01-2023", "01-01-2024", "1h")
+
+    cerebro.adddata(data)
+    cerebro.run()
+    cerebro.plot(style="bar")
+
+
+if __name__ == '__main__':
+    runstrat()
+```
+
+Вывод покажет загруженный Источник данных:
+
+![pict1.png](https://github.com/Celeevo/moex_store/blob/master/pict1.png?raw=true)
+
+Экземпляр Хранилища `store` позволяет осуществлять загрузку нескольких источников данных:
+
+```python
+from __future__ import (absolute_import, division, print_function,
+                    unicode_literals)
+import backtrader as bt
+from moex_store import MoexStore
+from datetime import datetime
+
+def runstrat():
+    cerebro = bt.Cerebro(stdstats=False)
+    cerebro.addstrategy(bt.Strategy)
+
+    store = MoexStore(write_to_file=False)
+    tf = '1d'
+    today = datetime.today()
+    for tiker in ('GAZP', 'NLMK', 'SIH4'):
+        data = store.get_data(f'{tiker}_{tf}', tiker, '01-01-2023', today, tf)
+        cerebro.adddata(data)
+
+    cerebro.run()
+    cerebro.plot(style='bar')
+
+
+if __name__ == '__main__':
+    runstrat()
+```
+
+Источники данных, добавленные в `cerebro`:
+
+![pict2.png](https://github.com/Celeevo/moex_store/blob/master/pict2.png?raw=true)
+
+
+
+
+
+
+

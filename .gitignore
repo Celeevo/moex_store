@@ -1,6 +1,7 @@
-/.venv/
 .idea/
 venv/
 /files_from_moex/
 /dist/
 /moex_store.egg-info/
+/moex_store/__pycache__/
+/tests/__pycache__/

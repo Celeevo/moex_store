@@ -126,8 +126,10 @@ class MoexStore:
 
         # Проверка get_instrument_info
         sec_info = asyncio.run(self.get_instrument_info(sec_id))
+
         if sec_info[-1] is None:
             raise ValueError(f"Инструмент с sec_id {sec_id} не найден на Бирже")
+
         print(f'Инструмент {sec_id} найден на Бирже')
         self.sec_details[sec_id] = dict(
             sectype=sec_info[0],

@@ -1,5 +1,7 @@
 import os
 import time
+from pprint import pprint
+
 import pandas as pd
 import backtrader as bt
 import aiohttp
@@ -15,6 +17,10 @@ from ssl import SSLCertVerificationError
 
 TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
+# TODO:
+#  1. Формат даты 21.03.2024
+#  2. ValueError: fromdate (2022-05-18 00:00:00) для SiH4 должен быть между 2022-05-18 11:45:00 и 2024-03-21 13:59:00
+#  3. "RIM6" -> "RTS-6.26"
 
 class MoexStore:
     def __init__(self, write_to_file=True, max_retries=3, retry_delay=2):
@@ -85,7 +91,8 @@ class MoexStore:
                 raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
 
     # def get_data(self, name, sec_id, fromdate, todate, tf):
-    def get_data(self, sec_id, fromdate, todate, tf):
+    def get_data(self, sec_id, fromdate, todate, tf, name=None):
+        alias = ('getdata',)
         fromdate = self._parse_date(fromdate)
         todate = self._parse_date(todate)
 
@@ -96,7 +103,11 @@ class MoexStore:
         moex_data = asyncio.run(self._get_candles_history(sec_id, fromdate, todate, tf))
         # Готовим итоговый дата-фрейм для backtrader.cerebro
         moex_df = self.make_df(moex_data, tf, self.sec_details[sec_id]['market'], sec_id)  # формируем файл с историей
-        data = bt.feeds.PandasData(dataname=moex_df)
+        if name:
+            data = bt.feeds.PandasData(dataname=moex_df, name=name)
+        else:
+            data = bt.feeds.PandasData(dataname=moex_df)
+
         return data
 
     @staticmethod
@@ -139,23 +150,24 @@ class MoexStore:
             market=sec_info[4],
             engine=sec_info[5]
         )
-        # self.board, self.market, self.engine = sec_info
+        pprint(self.sec_details[sec_id])
 
         # Проверка get_history_intervals
         interval_data = asyncio.run(self.get_history_intervals(sec_id, self.sec_details[sec_id]['board'],
                                                                self.sec_details[sec_id]['market'],
                                                                self.sec_details[sec_id]['engine']))
-        if interval_data is None:
-            raise ValueError(f"Нет доступных интервалов для sec_id {sec_id}")
 
-        valid_interval = None
-        for interval in interval_data:
-            # Если запрошен тайм-фрейм 5, 15 или 30 мин, то проверяем наличие на Биржи котировок
-            # с тайм-фреймом 1 мин, так как из них будут приготовлены котировки для 5, 15 или 30 мин.
-            tff = 1 if TF[tf] in (5, 15, 30) else TF[tf]
-            if interval['interval'] == tff:
-                valid_interval = interval
-                break
+        # [{'begin': '2022-05-18 11:45:00', 'end': '2024-03-21 13:59:00', 'interval': 1,
+        # 'board_group_id': 45} {'begin': '2022-04-01 00:00:00', 'end': '2024-01-01 00:00:00', 'interval': 4,
+        # 'board_group_id': 45}, ... ]
+
+        if interval_data is None:
+            raise ValueError(f"На Бирже нет доступных котировок для инструмента {sec_id}.")
+
+        # Если запрошен тайм-фрейм 5, 15 или 30 мин, то проверяем наличие на Биржи котировок
+        # с тайм-фреймом 1 мин, так как из них будут приготовлены котировки для 5, 15 или 30 мин.
+        user_tf = 1 if TF[tf] in (5, 15, 30) else TF[tf]
+        valid_interval = next((item for item in interval_data if item['interval'] == user_tf), None)
 
         if not valid_interval:
             raise ValueError(f"Тайм-фрейм {tf} не доступен для инструмента {sec_id}")

@@ -127,8 +127,10 @@ class MoexStore:
 
     def _validate_inputs(self, sec_id, fromdate, todate, tf):
         # Проверка fromdate <= todate
-        if fromdate > todate:
-            raise ValueError(f"fromdate ({fromdate}) должен быть меньше (раньше) или равен todate ({todate})")
+        if fromdate >= todate:
+            raise ValueError(f"fromdate ({fromdate}) должен быть меньше (раньше) todate ({todate}), \n"
+                             f"для получения котировок за один день используйте, например для 2023-06-20: \n"
+                             f"fromdate = '2023-06-20', todate = '2023-06-21'")
 
         # Проверка наличия tf в TF
         if tf not in TF:
@@ -150,7 +152,7 @@ class MoexStore:
             market=sec_info[4],
             engine=sec_info[5]
         )
-        pprint(self.sec_details[sec_id])
+        # pprint(self.sec_details[sec_id])
 
         # Проверка get_history_intervals
         interval_data = asyncio.run(self.get_history_intervals(sec_id, self.sec_details[sec_id]['board'],
@@ -168,6 +170,7 @@ class MoexStore:
         # с тайм-фреймом 1 мин, так как из них будут приготовлены котировки для 5, 15 или 30 мин.
         user_tf = 1 if TF[tf] in (5, 15, 30) else TF[tf]
         valid_interval = next((item for item in interval_data if item['interval'] == user_tf), None)
+        # print(f'{valid_interval}')
 
         if not valid_interval:
             raise ValueError(f"Тайм-фрейм {tf} не доступен для инструмента {sec_id}")
@@ -175,8 +178,16 @@ class MoexStore:
         valid_begin = datetime.strptime(valid_interval['begin'], '%Y-%m-%d %H:%M:%S')
         valid_end = datetime.strptime(valid_interval['end'], '%Y-%m-%d %H:%M:%S')
 
-        if not (valid_begin <= fromdate <= valid_end):
-            raise ValueError(f"fromdate ({fromdate}) для {sec_id} должен быть между {valid_begin} и {valid_end}")
+        # if not (valid_begin <= fromdate <= valid_end):
+        if fromdate > valid_end:
+            # raise ValueError(f"fromdate ({fromdate}) для {sec_id} должен быть между {valid_begin} и {valid_end}")
+            raise ValueError(f"fromdate ({fromdate}) для {sec_id} должен быть меньше {valid_end}, \n"
+                             f"валидный интервал с {valid_interval['begin']} по {valid_interval['end']}")
+
+        if todate < valid_begin:
+            raise ValueError(f"todate ({todate}) для {sec_id} должен быть больше {valid_begin}, \n"
+                             f"валидный интервал с {valid_interval['begin']} по {valid_interval['end']}")
+
 
     # @staticmethod
     async def get_instrument_info(self, secid):
@@ -288,13 +299,22 @@ class MoexStore:
 
     def make_df(self, data, tf, market, sec_id):
         df = pd.DataFrame(data)
+        # print(df.columns)
+
+        # Определим необходимые столбцы
+        required_columns = ['open', 'close', 'high', 'low', 'value', 'volume', 'begin']
+
+        # Проверим наличие всех необходимых столбцов
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise KeyError(f"Отсутствуют необходимые столбцы: {', '.join(missing_columns)}")
+
         if market == 'index':
-            if 'volume' in df.columns:
-                df.drop(columns=['volume'], inplace=True)
+            df.drop(columns=['volume'], inplace=True)
             df.rename(columns={'value': 'volume'}, inplace=True)  # VOLUME = value, ибо Индексы имеют только value
         else:
-            if 'value' in df.columns:
-                df.drop(columns=['value'], inplace=True)
+            df.drop(columns=['value'], inplace=True)
+
         df.rename(columns={'begin': 'datetime'}, inplace=True)
         df['datetime'] = pd.to_datetime(df['datetime'])  # Преобразование в datetime
         df = df[['datetime', 'open', 'high', 'low', 'close', 'volume']]
@@ -305,8 +325,11 @@ class MoexStore:
             directory = os.path.dirname(csv_file_path)
             if not os.path.exists(directory):
                 os.makedirs(directory)
-            df.to_csv(csv_file_path, sep=',', index=True, header=True)
-            print(f'Котировки записаны в файл "{csv_file_path}"')
+            try:
+                df.to_csv(csv_file_path, sep=',', index=True, header=True)
+                print(f'Котировки записаны в файл "{csv_file_path}"')
+            except IOError as e:
+                print(f"Ошибка при записи файла: {e}")
 
         return df
 

@@ -17,11 +17,6 @@ from ssl import SSLCertVerificationError
 
 TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
-# TODO:
-#  1. Формат даты 21.03.2024
-#  2. ValueError: fromdate (2022-05-18 00:00:00) для SiH4 должен быть между 2022-05-18 11:45:00 и 2024-03-21 13:59:00
-#  3. "RIM6" -> "RTS-6.26"
-
 class MoexStore:
     def __init__(self, write_to_file=True, max_retries=3, retry_delay=2):
         self.wtf = write_to_file
@@ -91,24 +86,22 @@ class MoexStore:
                 raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
 
     # def get_data(self, name, sec_id, fromdate, todate, tf):
-    def get_data(self, sec_id, fromdate, todate, tf, name=None):
-        alias = ('getdata',)
+    def get_data(self, sec_id, fromdate, todate, tf='1h', name=None):
         fromdate = self._parse_date(fromdate)
         todate = self._parse_date(todate)
 
         # Проверка значений
-        self._validate_inputs(sec_id, fromdate, todate, tf)
+        self._validate_inputs(sec_id, fromdate, todate, tf, name)
 
-        # Получение данных
+        # Получение исторических котировок
         moex_data = asyncio.run(self._get_candles_history(sec_id, fromdate, todate, tf))
         # Готовим итоговый дата-фрейм для backtrader.cerebro
         moex_df = self.make_df(moex_data, tf, self.sec_details[sec_id]['market'], sec_id)  # формируем файл с историей
-        if name:
-            data = bt.feeds.PandasData(dataname=moex_df, name=name)
-        else:
-            data = bt.feeds.PandasData(dataname=moex_df)
+        data = bt.feeds.PandasData(dataname=moex_df, fromdate=fromdate, todate=todate, name=name)
 
         return data
+
+    getdata = get_data
 
     @staticmethod
     def _parse_date(date_input):
@@ -121,11 +114,13 @@ class MoexStore:
                 except ValueError:
                     continue
             raise ValueError(f"Неверный формат даты: {date_input}. Используйте тип datetime или тип "
-                             f"str в форматах 'YYYY-MM-DD' и 'DD-MM-YYYY'.")
+                             f"str в формате 'YYYY-MM-DD' или 'DD-MM-YYYY'.")
         else:
             raise ValueError(f"Дата должна быть типа datetime или str, получили {type(date_input).__name__}")
 
-    def _validate_inputs(self, sec_id, fromdate, todate, tf):
+    def _validate_inputs(self, sec_id, fromdate, todate, tf, name):
+        if not isinstance(name, str):
+           raise ValueError(f"Тип имени источника данных должен быть str, получен {type(name).__name__}")
         # Проверка fromdate <= todate
         if fromdate >= todate:
             raise ValueError(f"fromdate ({fromdate}) должен быть меньше (раньше) todate ({todate}), \n"
@@ -135,7 +130,7 @@ class MoexStore:
         # Проверка наличия tf в TF
         if tf not in TF:
             raise ValueError(
-                f"Тайм-фрейм для {sec_id} должен быть одним из списка: {list(TF.keys())}, получили: {tf = }")
+                f"Тайм-фрейм для {sec_id} должен быть одним из списка: {list(TF.keys())}, получен: {tf = }")
 
         # Проверка get_instrument_info
         sec_info = asyncio.run(self.get_instrument_info(sec_id))
@@ -154,7 +149,7 @@ class MoexStore:
         )
         # pprint(self.sec_details[sec_id])
 
-        # Проверка get_history_intervals
+        # Проверка доступных интервалов котировок get_history_intervals
         interval_data = asyncio.run(self.get_history_intervals(sec_id, self.sec_details[sec_id]['board'],
                                                                self.sec_details[sec_id]['market'],
                                                                self.sec_details[sec_id]['engine']))
@@ -164,7 +159,7 @@ class MoexStore:
         # 'board_group_id': 45}, ... ]
 
         if interval_data is None:
-            raise ValueError(f"На Бирже нет доступных котировок для инструмента {sec_id}.")
+            raise ValueError(f"На Бирже нет доступных интервалов котировок для инструмента {sec_id}.")
 
         # Если запрошен тайм-фрейм 5, 15 или 30 мин, то проверяем наличие на Биржи котировок
         # с тайм-фреймом 1 мин, так как из них будут приготовлены котировки для 5, 15 или 30 мин.
@@ -178,14 +173,13 @@ class MoexStore:
         valid_begin = datetime.strptime(valid_interval['begin'], '%Y-%m-%d %H:%M:%S')
         valid_end = datetime.strptime(valid_interval['end'], '%Y-%m-%d %H:%M:%S')
 
-        # if not (valid_begin <= fromdate <= valid_end):
         if fromdate > valid_end:
             # raise ValueError(f"fromdate ({fromdate}) для {sec_id} должен быть между {valid_begin} и {valid_end}")
-            raise ValueError(f"fromdate ({fromdate}) для {sec_id} должен быть меньше {valid_end}, \n"
+            raise ValueError(f"fromdate ({fromdate}) для {sec_id} и тайм-фрейма '{tf}' должен быть меньше (раньше) {valid_end}, \n"
                              f"валидный интервал с {valid_interval['begin']} по {valid_interval['end']}")
 
         if todate < valid_begin:
-            raise ValueError(f"todate ({todate}) для {sec_id} должен быть больше {valid_begin}, \n"
+            raise ValueError(f"todate ({todate}) для {sec_id} и тайм-фрейма '{tf}' должен быть больше (позже) {valid_begin}, \n"
                              f"валидный интервал с {valid_interval['begin']} по {valid_interval['end']}")
 
 
@@ -270,9 +264,6 @@ class MoexStore:
                 data = await aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end,
                                                         market=self.sec_details[sec_id]['market'],
                                                         engine=self.sec_details[sec_id]['engine'])
-
-            # with open("output.txt", "a") as file:
-            #     file.write(f'{tf = }, {delta = }, elapsed_time = {elapsed_time:.2f}' + "\n")
 
             end_time = time.time()
             elapsed_time = end_time - start_time

@@ -1,28 +1,24 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 import backtrader as bt
-from datetime import datetime
+from datetime import datetime, timedelta
 from moex_store import MoexStore
 
+spam = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
 def runstrat():
-    d1 = datetime(2023, 5, 18, 11, 45, 00)
-    d2 = datetime(2023, 5, 18, 0, 0, 00)
-    print(d1>d2)
-
     cerebro = bt.Cerebro(stdstats=False)
     cerebro.addstrategy(bt.Strategy)
 
     store = MoexStore(write_to_file=True)
-    fd = "2024-03-21"
-    # td = datetime.today()
-    td = "2024-03-22"
-    # tf='15m'
-    tf='1h'
-    # for tiker in ('SiM4', 'RiH4', 'GZM4', 'RUABICP', 'RGBI', 'RUPCI'):
-    for tiker in ('SiM4', 'RiH4'):
-        data = store.get_data(sec_id=tiker, fromdate=fd, todate=td, tf=tf)
-        cerebro.adddata(data, name=tiker)
+
+    for tiker in ('SiU4', 'RiU4'): # 'SiM4', 'RiH4', 'GZM4', 'RUABICP', 'RGBI', 'RUPCI'
+        data = store.getdata(sec_id=tiker,
+                             fromdate=datetime.today() - timedelta(days=1),
+                             todate=datetime.today(),
+                             tf='1m',
+                             name='Смузи!')
+        cerebro.adddata(data)
 
     cerebro.run()
     cerebro.plot(style='bar')

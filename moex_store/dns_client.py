@@ -1,7 +1,7 @@
 import aiohttp
 from aiohttp import client_exceptions
 import socket
-from aiomoex.client import ISSClient, ISSMoexError, TablesDict
+from aiomoex.client import ISSClient, ISSMoexError
 
 
 class DNS_ISSClient(ISSClient):

@@ -116,7 +116,8 @@ class MoexStore:
             raise ValueError(f"Неверный формат даты: {date_input}. Используйте тип datetime или тип "
                              f"str в формате 'YYYY-MM-DD' или 'DD-MM-YYYY'.")
         else:
-            raise ValueError(f"Дата должна быть типа datetime или str, получили {type(date_input).__name__}")
+            raise ValueError(f"Дата должна быть типа datetime или str, получили тип: {type(date_input).__name__}, "
+                             f"значение: {date_input}")
 
     def _validate_inputs(self, sec_id, fromdate, todate, tf, name):
         if not isinstance(name, str):

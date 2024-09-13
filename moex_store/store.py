@@ -14,6 +14,7 @@ import moex_store.patch_aiohttp
 import ssl
 from aiohttp.client_exceptions import ClientConnectorCertificateError
 from ssl import SSLCertVerificationError
+from moex_store.futures import Futures
 
 TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
@@ -23,7 +24,7 @@ class MoexStore:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.sec_details = {}
-        # self.ssl_context = None
+        self.futures = Futures()
         asyncio.run(self._check_connection())
 
     def apply_ssl_patch(self):

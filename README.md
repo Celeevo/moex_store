@@ -153,8 +153,6 @@ if __name__ == '__main__':
 
 ![pict2.png](assets%2Fpict2.png)
 
-![pict2.png](https://github.com/Celeevo/moex_store/blob/master/pict2.png?raw=true)
-
 
 
 

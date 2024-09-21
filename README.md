@@ -219,37 +219,37 @@ Html файл с этой таблицей будет сохранен в пап
 контрактов на индекс РТС за один прошедший год, начиная с текущей даты:
 
 ```python linenums="1"
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-import backtrader as bt
-from datetime import datetime, timedelta
-from moex_store import MoexStore
-
-
-def runstrat():
-    cerebro = bt.Cerebro(stdstats=False)
-    store = MoexStore()
-    from_date = datetime.today() - timedelta(days=365)  # 2023-09-22
-    to_date = datetime.today()                          # 2024-09-21
-    contracts = store.futures.get_contracts_between(asset='RTS', 
-                                                    from_date=from_date, 
-                                                    to_date=to_date)
-    # contracts - ['RIZ3', 'RIH4', 'RIM4', 'RIU4', 'RIZ4']
-    
-    for tiker in contracts:
-        from_date = store.futures.get_previous_contract_exp_date(tiker)
-        to_date = store.futures.get_contract_exp_date(tiker)
-        data = store.getdata(sec_id=tiker, 
-                             fromdate=from_date, todate=to_date, 
-                             tf='1h', name=tiker)
-        cerebro.adddata(data)
-
-    cerebro.run()
-    cerebro.plot(style='bar')
-
-
-if __name__ == '__main__':
-    runstrat()
+1. from __future__ import (absolute_import, division, print_function,
+2.                         unicode_literals)
+3. import backtrader as bt
+4. from datetime import datetime, timedelta
+5. from moex_store import MoexStore
+6. 
+7.
+8. def runstrat():
+9.     cerebro = bt.Cerebro(stdstats=False)
+10.    store = MoexStore()
+11.    from_date = datetime.today() - timedelta(days=365)  # 2023-09-22
+12.    to_date = datetime.today()                          # 2024-09-21
+13.    contracts = store.futures.get_contracts_between(asset='RTS', 
+14.                                                    from_date=from_date, 
+15.                                                    to_date=to_date)
+16.    # contracts - ['RIZ3', 'RIH4', 'RIM4', 'RIU4', 'RIZ4']
+17.    
+18.    for tiker in contracts:
+19.        from_date = store.futures.get_previous_contract_exp_date(tiker)
+20.        to_date = store.futures.get_contract_exp_date(tiker)
+21.        data = store.getdata(sec_id=tiker, 
+22.                             fromdate=from_date, todate=to_date, 
+23.                             tf='1h', name=tiker)
+24.        cerebro.adddata(data)
+25.
+26.    cerebro.run()
+27.    cerebro.plot(style='bar')
+28.
+29.
+30. if __name__ == '__main__':
+31.     runstrat()
 ```
 
 Разберем код по строкам:

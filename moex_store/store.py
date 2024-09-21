@@ -24,7 +24,7 @@ class MoexStore:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.sec_details = {}
-        self.futures = Futures()
+        self.futures = Futures(self)
         asyncio.run(self._check_connection())
 
     def apply_ssl_patch(self):
@@ -88,8 +88,8 @@ class MoexStore:
 
     # def get_data(self, name, sec_id, fromdate, todate, tf):
     def get_data(self, sec_id, fromdate, todate, tf='1h', name=None):
-        fromdate = self._parse_date(fromdate)
-        todate = self._parse_date(todate)
+        fromdate = self.validate_date(fromdate)
+        todate = self.validate_date(todate)
 
         # Проверка значений
         self._validate_inputs(sec_id, fromdate, todate, tf, name)
@@ -105,36 +105,33 @@ class MoexStore:
     getdata = get_data
 
     @staticmethod
-    def _parse_date(date_input):
-        if isinstance(date_input, datetime):
-            return date_input
-        elif isinstance(date_input, str):
+    def validate_date(inp_date):
+        if isinstance(inp_date, datetime):
+            return inp_date
+        elif isinstance(inp_date, str):
             for fmt in ('%Y-%m-%d', '%d-%m-%Y'):
                 try:
-                    return datetime.strptime(date_input, fmt)
+                    return datetime.strptime(inp_date, fmt)
                 except ValueError:
                     continue
-            raise ValueError(f"Неверный формат даты: {date_input}. Используйте тип datetime или тип "
+            raise ValueError(f"Неверный формат даты: {inp_date}. Используйте тип datetime или тип "
                              f"str в формате 'YYYY-MM-DD' или 'DD-MM-YYYY'.")
         else:
-            raise ValueError(f"Дата должна быть типа datetime или str, получили тип: {type(date_input).__name__}, "
-                             f"значение: {date_input}")
+            raise ValueError(f"Дата должна быть типа datetime или str, получили тип: {type(inp_date).__name__}, "
+                             f"значение: {inp_date}")
 
     def _validate_inputs(self, sec_id, fromdate, todate, tf, name):
         if not isinstance(name, str):
            raise ValueError(f"Тип имени источника данных должен быть str, получен {type(name).__name__}")
-        # Проверка fromdate <= todate
         if fromdate >= todate:
             raise ValueError(f"fromdate ({fromdate}) должен быть меньше (раньше) todate ({todate}), \n"
                              f"для получения котировок за один день используйте, например для 2023-06-20: \n"
                              f"fromdate = '2023-06-20', todate = '2023-06-21'")
 
-        # Проверка наличия tf в TF
         if tf not in TF:
             raise ValueError(
                 f"Тайм-фрейм для {sec_id} должен быть одним из списка: {list(TF.keys())}, получен: {tf = }")
 
-        # Проверка get_instrument_info
         sec_info = asyncio.run(self.get_instrument_info(sec_id))
 
         if sec_info[-1] is None:
@@ -149,7 +146,6 @@ class MoexStore:
             market=sec_info[4],
             engine=sec_info[5]
         )
-        # pprint(self.sec_details[sec_id])
 
         # Проверка доступных интервалов котировок get_history_intervals
         interval_data = asyncio.run(self.get_history_intervals(sec_id, self.sec_details[sec_id]['board'],
@@ -167,7 +163,6 @@ class MoexStore:
         # с тайм-фреймом 1 мин, так как из них будут приготовлены котировки для 5, 15 или 30 мин.
         user_tf = 1 if TF[tf] in (5, 15, 30) else TF[tf]
         valid_interval = next((item for item in interval_data if item['interval'] == user_tf), None)
-        # print(f'{valid_interval}')
 
         if not valid_interval:
             raise ValueError(f"Тайм-фрейм {tf} не доступен для инструмента {sec_id}")
@@ -176,7 +171,6 @@ class MoexStore:
         valid_end = datetime.strptime(valid_interval['end'], '%Y-%m-%d %H:%M:%S')
 
         if fromdate > valid_end:
-            # raise ValueError(f"fromdate ({fromdate}) для {sec_id} должен быть между {valid_begin} и {valid_end}")
             raise ValueError(f"fromdate ({fromdate}) для {sec_id} и тайм-фрейма '{tf}' должен быть меньше (раньше) {valid_end}, \n"
                              f"валидный интервал с {valid_interval['begin']} по {valid_interval['end']}")
 
@@ -185,7 +179,6 @@ class MoexStore:
                              f"валидный интервал с {valid_interval['begin']} по {valid_interval['end']}")
 
 
-    # @staticmethod
     async def get_instrument_info(self, secid):
         async with aiohttp.ClientSession() as session:
             url = f"https://iss.moex.com/iss/securities/{secid}.json"

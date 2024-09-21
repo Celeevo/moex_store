@@ -12,7 +12,7 @@ def runstrat():
 
     store = MoexStore(write_to_file=True)
 
-    for tiker in ('SiU4', 'RiU4'): # 'SiM4', 'RiH4', 'GZM4', 'RUABICP', 'RGBI', 'RUPCI'
+    for tiker in ('Siz4', 'Riz4'): # 'SiM4', 'RiH4', 'GZM4', 'RUABICP', 'RGBI', 'RUPCI'
         data = store.getdata(sec_id=tiker,
                              fromdate=datetime.today() - timedelta(days=1),
                              todate=datetime.today(),

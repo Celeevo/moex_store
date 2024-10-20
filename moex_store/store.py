@@ -19,13 +19,13 @@ from moex_store.futures import Futures
 TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
 class MoexStore:
-    def __init__(self, write_to_file=True, max_retries=3, retry_delay=2):
+    def __init__(self, write_to_file=True, read_from_file=True, max_retries=3, retry_delay=2):
         self.wtf = write_to_file
+        self.rff = read_from_file
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.sec_details = {}
         self.futures = Futures(self)
-        asyncio.run(self._check_connection())
 
     def apply_ssl_patch(self):
         # Создаем SSL-контекст с отключенной проверкой сертификатов
@@ -86,23 +86,27 @@ class MoexStore:
             except Exception as e:
                 raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
 
-    # def get_data(self, name, sec_id, fromdate, todate, tf):
     def get_data(self, sec_id, fromdate, todate, tf='1h', name=None):
-        fromdate = self.validate_date(fromdate)
-        todate = self.validate_date(todate)
+        fd = self.validate_date(fromdate)
+        td = self.validate_date(todate)
 
         # Проверка значений
-        self._validate_inputs(sec_id, fromdate, todate, tf, name)
+        self._validate_inputs(sec_id, fd, td, tf, name)
 
-        # Получение исторических котировок
-        moex_data = asyncio.run(self._get_candles_history(sec_id, fromdate, todate, tf))
-        # Готовим итоговый дата-фрейм для backtrader.cerebro
-        moex_df = self.make_df(moex_data, tf, self.sec_details[sec_id]['market'], sec_id)  # формируем файл с историей
-        data = bt.feeds.PandasData(dataname=moex_df, fromdate=fromdate, todate=todate, name=name)
-
+        csv_file_path = f"files_from_moex/{sec_id}_{tf}_{fd.strftime('%d%m%Y')}_{td.strftime('%d%m%Y')}.csv"
+        if self.rff and os.path.isfile(csv_file_path):
+            moex_df = pd.read_csv(csv_file_path, parse_dates=['datetime'])
+            moex_df.set_index('datetime', inplace=True)
+            print(f'Для {sec_id} с указанными параметрами котировки найдены на Диске. Загружаю...')
+            if self.futures.get_active_contract(self.futures.get_asset_code(sec_id)) == sec_id:
+                print(f'Внимание! {sec_id} - активный фьючерсный контракт! Его котировки на диске могли протухнуть!...')
+        else:
+            asyncio.run(self._check_connection())  # Получение исторических котировок
+            moex_data = asyncio.run(self._get_candles_history(sec_id, fd, td, tf))
+            # Готовим итоговый дата-фрейм для backtrader.cerebro и записываем на диск в папку files_from_moex
+            moex_df = self._make_df(moex_data, self.sec_details[sec_id]['market'], csv_file_path)  # формируем файл с историей
+        data = bt.feeds.PandasData(dataname=moex_df, fromdate=fd, todate=td, name=name)
         return data
-
-    getdata = get_data
 
     @staticmethod
     def validate_date(inp_date):
@@ -178,8 +182,8 @@ class MoexStore:
             raise ValueError(f"todate ({todate}) для {sec_id} и тайм-фрейма '{tf}' должен быть больше (позже) {valid_begin}, \n"
                              f"валидный интервал с {valid_interval['begin']} по {valid_interval['end']}")
 
-
-    async def get_instrument_info(self, secid):
+    @staticmethod
+    async def get_instrument_info(secid):
         async with aiohttp.ClientSession() as session:
             url = f"https://iss.moex.com/iss/securities/{secid}.json"
             # https://iss.moex.com/iss/securities/GZU4.json
@@ -242,8 +246,8 @@ class MoexStore:
             start_time = time.time()
             if tf in (1, 10, 60, 24):
                 estimated_time = self.get_estimated_time(delta, tf)
-                print(f'Ожидаемое время загрузки данных (зависит от загрузки серверов MOEX): {estimated_time:.0f} сек.')
-                time.sleep(0.1)
+                print(f'Ожидаемое время загрузки данных для {sec_id} (зависит от загрузки серверов MOEX): {estimated_time:.0f} сек.')
+                time.sleep(0.05)
                 data_task = asyncio.create_task(
                     aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end,
                                                market=self.sec_details[sec_id]['market'],
@@ -283,7 +287,7 @@ class MoexStore:
 
             return data
 
-    def make_df(self, data, tf, market, sec_id):
+    def _make_df(self, data, market, csv_file):
         df = pd.DataFrame(data)
         # print(df.columns)
 
@@ -307,13 +311,12 @@ class MoexStore:
         df.set_index('datetime', inplace=True)
 
         if self.wtf:
-            csv_file_path = f"files_from_moex/{sec_id}_tf-{tf}.csv"
-            directory = os.path.dirname(csv_file_path)
+            directory = os.path.dirname(csv_file)
             if not os.path.exists(directory):
                 os.makedirs(directory)
             try:
-                df.to_csv(csv_file_path, sep=',', index=True, header=True)
-                print(f'Котировки записаны в файл "{csv_file_path}"')
+                df.to_csv(csv_file, sep=',', index=True, header=True)
+                print(f'Котировки записаны в файл "{csv_file}"')
             except IOError as e:
                 print(f"Ошибка при записи файла: {e}")
 
@@ -341,3 +344,5 @@ class MoexStore:
                     break
                 await asyncio.sleep(duration / 100)
                 pbar.update(1)
+
+    getdata = get_data

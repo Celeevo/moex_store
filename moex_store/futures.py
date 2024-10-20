@@ -30,9 +30,7 @@ class Futures:
         sec_info = asyncio.run(self.parent.get_instrument_info(sec_id))
 
         if sec_info[-1] is None:
-            # raise ValueError(f"Инструмент с sec_id {sec_id} не найден на Бирже")
-            print(f"Инструмент с sec_id {sec_id} не найден на Бирже")
-            return None
+            raise ValueError(f"Инструмент {sec_id = } не найден на Бирже")
 
         # print(f'Инструмент {sec_id} найден на Бирже')
         self.parent.sec_details[sec_id] = dict(
@@ -45,8 +43,8 @@ class Futures:
         )
 
         if self.parent.sec_details[sec_id]['sectype'] != 'futures':
-            print(f'Но это не фьючерс. Тип инструмента: {self.parent.sec_details[sec_id]["sectype"]}')
-            return None
+            raise ValueError(f'Вызвана функция для фьючерса, но {sec_id} - это не фьючерс. Тип инструмента: '
+                             f'{self.parent.sec_details[sec_id]["sectype"]}. Проверьте ваши инструменты.')
 
         return self.parent.sec_details[sec_id]
 
@@ -124,7 +122,6 @@ class Futures:
         c_list = contract_list[index1:index2 + 1]
         return c_list
 
-
     def get_contract_exp_date(self, sec_id):
         asset = self.get_asset_code(sec_id)
         if asset:
@@ -170,12 +167,11 @@ class Futures:
                 columns = ["secid", "shortname", "startdate", "expdate", "assetcode", "underlyingasset",
                            "is_traded"]
                 self._display_table(history_stat, columns, name="exp_dates")
-                return None
+                # return None
             else:
                 return history_stat
         print(f"Биржа не вернула статистику по коду базового актива {asset}. Проверьте его.")
         return None
-
 
     def get_all_active_futures(self, show_table=True):
         '''
@@ -283,7 +279,8 @@ class Futures:
                 logging.error(f"Ошибка получения данных: {e}")
                 raise MOEXConnectionError(f"Не удалось получить данные: {e}")
 
-    async def _get_futures_stat(self, asset, session=None):
+    @staticmethod
+    async def _get_futures_stat(asset, session=None):
         url = f"https://iss.moex.com/iss/statistics/engines/futures/markets/forts/series.json?iss.meta=off&asset_code={asset}&show_expired=1"
         try:
             async with session or aiohttp.ClientSession() as session:

@@ -5,15 +5,14 @@ from datetime import timedelta
 
 import backtrader as bt
 from moex_store import MoexStore
-# from sizers.strategy_lib_order_diff import RsiStrategy, comminfo, UniRiskSizer
-# from sizers.strategy_lib_no_sizer import RsiStrategy, comminfo, UniRiskSizer
+from sizers.strategy_lib_no_sizer import RsiStrategy, comminfo, UniRiskSizer
 # import datetime
 
 def runstrat():
-    contracts = ['EuZ1', 'EuZ3', 'EuH4', 'EuM4', 'EuU4']
+    contracts = ['EuH3', 'EuM3', 'EuU3', 'EuZ3', 'EuH4', 'EuM4', 'EuU4']
     datas = []
+    pnl, profit_trades, losing_trades = 0, 0, 0
     for sec_id in contracts:
-        # sec_id = 'EuZ3'
         tf = '15m'
         store = MoexStore()
         fromdate = store.futures.prevexpdate(sec_id)
@@ -31,15 +30,19 @@ def runstrat():
     #     cerebro.adddata(data)
     #     cerebro.broker.addcommissioninfo(comminfo)
     #     cerebro.addsizer(UniRiskSizer)
-    #     cerebro.addstrategy(RsiStrategy, rsi_period=12, all_in=True, solid_exit=True, risk=12, log=False)
+    #     cerebro.addstrategy(RsiStrategy, rsi_period=12, all_in=True, solid_exit=False, risk=4, log=False)
     #     # cerebro.optstrategy(RsiStrategy, rsi_period=(12, ), stop_period=(7, ), slippage=range(0,16))
-    #     cerebro.run()
-        # cerebro.plot(style='bar', linevalues=False, valuetags=False)
-        # cerebro.plot(style='bar', start=datetime.date(2024, 3, 26), end=datetime.date(2024, 3, 28))
-
+    #     strat = cerebro.run()
+    #
+    #     strategy_instance = strat[0]
+    #     pnl += strategy_instance.pnl
+    #     profit_trades += strategy_instance.profit_trades
+    #     losing_trades += strategy_instance.losing_trades
+    #
+    #     # cerebro.plot(style='bar', linevalues=False, valuetags=False)
+    #     # cerebro.plot(style='bar', start=datetime.date(2024, 3, 26), end=datetime.date(2024, 3, 28))
+    # pl_ratio = round(profit_trades/losing_trades, 2)
+    # print(f'{50*"-"} \n Итого Профит = {pnl}, Прибыльные сделки = {profit_trades}, Убыточные сделки = {losing_trades}, P/L = {pl_ratio}')
 
 if __name__ == '__main__':
     runstrat()
-
-# spam = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
-

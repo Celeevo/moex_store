@@ -34,7 +34,7 @@ class Futures:
             print(f"Инструмент с sec_id {sec_id} не найден на Бирже")
             return None
 
-        print(f'Инструмент {sec_id} найден на Бирже')
+        # print(f'Инструмент {sec_id} найден на Бирже')
         self.parent.sec_details[sec_id] = dict(
             sectype=sec_info[0],
             grouptype=sec_info[1],

@@ -292,6 +292,13 @@ Html файл с этой таблицей будет сохранен в пап
 
 ### Справка по функциям
 
+Применение:
+
+```python
+store = MoexStore()
+result = store.futures.function()
+```
+
 #### **get_all_active_futures(show_table)**
 * Алиас: `all_active`
 * Принимает на вход параметр `show_table` (по умолчанию `True`):

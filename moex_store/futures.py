@@ -94,8 +94,8 @@ class Futures:
         if not isinstance(asset, str):
             print(f"Код базового актива должен быть строкой, получен тип: {type(asset).__name__}")
             return None
-        from_date = self.parent.validate_date(from_date)
-        to_date = self.parent.validate_date(to_date)
+        from_date = self.parent.validate_fromdate(from_date)
+        to_date = self.parent.validate_todate(to_date)
         if to_date < from_date:
             print(f"Дата to_date {to_date.date()} должна быть больше или равна from_date {from_date.date()}. Получили {to_date < from_date = }")
             return None
@@ -306,7 +306,7 @@ class Futures:
                          [datetime.strptime(item[3], "%Y-%m-%d").date()] + item[4:]
                          for item in stat]
 
-            data = self.parent.validate_date(date)
+            data = self.parent.validate_todate(date)
             if isinstance(data, datetime):
                 data = data.date()
             filtered = [item for item in dstat if item[3] > data]

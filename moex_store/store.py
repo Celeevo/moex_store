@@ -1,5 +1,5 @@
 import os
-import time
+import time as timer
 from pprint import pprint
 
 import pandas as pd
@@ -7,7 +7,7 @@ import backtrader as bt
 import aiohttp
 import asyncio
 import aiomoex
-from datetime import datetime
+from datetime import datetime, time
 from tqdm.asyncio import tqdm_asyncio
 from moex_store.tf import change_tf
 import moex_store.patch_aiohttp
@@ -77,18 +77,18 @@ class MoexStore:
                     print(f"Попытка {attempts + 1} с отключенной проверкой SSL не удалась: {e}")
                     attempts += 1
                     if attempts < self.max_retries:
-                        time.sleep(self.retry_delay)
+                        timer.sleep(self.retry_delay)
             except aiohttp.ClientError as e:
                 print(f"Попытка {attempts + 1}: Не удалось подключиться к MOEX: {e}")
                 attempts += 1
                 if attempts < self.max_retries:
-                    time.sleep(self.retry_delay)
+                    timer.sleep(self.retry_delay)
             except Exception as e:
                 raise ConnectionError(f"Не удалось подключиться к MOEX: {e}")
 
     def get_data(self, sec_id, fromdate, todate, tf='1h', name=None):
-        fd = self.validate_date(fromdate)
-        td = self.validate_date(todate)
+        fd = self.validate_fromdate(fromdate)
+        td = self.validate_todate(todate)
 
         # Проверка значений
         self._validate_inputs(sec_id, fd, td, tf, name)
@@ -109,13 +109,32 @@ class MoexStore:
         return data
 
     @staticmethod
-    def validate_date(inp_date):
+    def validate_fromdate(inp_date):
         if isinstance(inp_date, datetime):
             return inp_date
         elif isinstance(inp_date, str):
             for fmt in ('%Y-%m-%d', '%d-%m-%Y'):
                 try:
                     return datetime.strptime(inp_date, fmt)
+                except ValueError:
+                    continue
+            raise ValueError(f"Неверный формат даты: {inp_date}. Используйте тип datetime или тип "
+                             f"str в формате 'YYYY-MM-DD' или 'DD-MM-YYYY'.")
+        else:
+            raise ValueError(f"Дата должна быть типа datetime или str, получили тип: {type(inp_date).__name__}, "
+                             f"значение: {inp_date}")
+
+    @staticmethod
+    def validate_todate(inp_date):
+        if isinstance(inp_date, datetime):
+            if inp_date.time() == time(0, 0, 0):
+                return datetime.combine(inp_date.date(), time(23, 59, 59, 999990))
+            return inp_date
+        elif isinstance(inp_date, str):
+            for fmt in ('%Y-%m-%d', '%d-%m-%Y'):
+                try:
+                    _date = datetime.strptime(inp_date, fmt)
+                    return datetime.combine(_date.date(), time(23, 59, 59, 999990))
                 except ValueError:
                     continue
             raise ValueError(f"Неверный формат даты: {inp_date}. Используйте тип datetime или тип "
@@ -243,11 +262,11 @@ class MoexStore:
             resample_tf_value = None
 
         async with aiohttp.ClientSession() as session:
-            start_time = time.time()
+            start_time = timer.time()
             if tf in (1, 10, 60, 24):
                 estimated_time = self.get_estimated_time(delta, tf)
                 print(f'Ожидаемое время загрузки данных для {sec_id} (зависит от загрузки серверов MOEX): {estimated_time:.0f} сек.')
-                time.sleep(0.05)
+                timer.sleep(0.05)
                 data_task = asyncio.create_task(
                     aiomoex.get_market_candles(session, sec_id, interval=tf, start=start, end=end,
                                                market=self.sec_details[sec_id]['market'],
@@ -264,7 +283,7 @@ class MoexStore:
                                                         market=self.sec_details[sec_id]['market'],
                                                         engine=self.sec_details[sec_id]['engine'])
 
-            end_time = time.time()
+            end_time = timer.time()
             elapsed_time = end_time - start_time
             if data:
                 print(f'История котировок {sec_id} c {fromdate.strftime("%Y-%m-%d")} по {todate.strftime("%Y-%m-%d")} '

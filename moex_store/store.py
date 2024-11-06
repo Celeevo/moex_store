@@ -98,8 +98,9 @@ class MoexStore:
             moex_df = pd.read_csv(csv_file_path, parse_dates=['datetime'])
             moex_df.set_index('datetime', inplace=True)
             print(f'Для {sec_id} с указанными параметрами котировки найдены на Диске. Загружаю...')
-            if self.futures.get_active_contract(self.futures.get_asset_code(sec_id)) == sec_id:
-                print(f'Внимание! {sec_id} - активный фьючерсный контракт! Его котировки на диске могли протухнуть!...')
+            if self.sec_details[sec_id]['sectype'] == 'futures':
+                if self.futures.get_active_contract(self.futures.get_asset_code(sec_id)) == sec_id:
+                    print(f'Внимание! {sec_id} - активный фьючерсный контракт! Его котировки на диске могли протухнуть!...')
         else:
             asyncio.run(self._check_connection())  # Получение исторических котировок
             moex_data = asyncio.run(self._get_candles_history(sec_id, fd, td, tf))

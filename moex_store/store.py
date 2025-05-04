@@ -15,11 +15,13 @@ import ssl
 from aiohttp.client_exceptions import ClientConnectorCertificateError
 from ssl import SSLCertVerificationError
 from moex_store.futures import Futures
+import certifi
 
 TF = {'1m': 1, '5m': 5, '10m': 10, '15m': 15, '30m': 30, '1h': 60, '1d': 24, '1w': 7, '1M': 31, '1q': 4}
 
 class MoexStore:
     def __init__(self, write_to_file=True, read_from_file=True, max_retries=3, retry_delay=2):
+        self.apply_ssl_patch()
         self.wtf = write_to_file
         self.rff = read_from_file
         self.max_retries = max_retries
@@ -28,20 +30,45 @@ class MoexStore:
         self.futures = Futures(self)
 
     def apply_ssl_patch(self):
-        # Создаем SSL-контекст с отключенной проверкой сертификатов
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        """Подменяем конструкторы aiohttp так, чтобы везде
+        использовался SSL-контекст с актуальными корневыми CA."""
+        # === 1. Контекст с доверенным набором CA ===
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 
-        # Переопределяем оригинальный метод ClientSession
-        _original_init = aiohttp.ClientSession.__init__
+        # === 2. Если ClientSession создаётся без connector — вставляем свой ===
+        _orig_sess_init = aiohttp.ClientSession.__init__
 
-        def _patched_init(self, *args, **kwargs):
-            if 'connector' not in kwargs:
-                kwargs['connector'] = aiohttp.TCPConnector(ssl=ssl_context)
-            _original_init(self, *args, **kwargs)
+        def _patched_sess_init(self, *args, **kwargs):
+            kwargs.setdefault('connector', aiohttp.TCPConnector(ssl=ssl_ctx))
+            _orig_sess_init(self, *args, **kwargs)
 
-        aiohttp.ClientSession.__init__ = _patched_init
+        aiohttp.ClientSession.__init__ = _patched_sess_init
+
+        # === 3. Если кто-то явно создаёт TCPConnector, но ssl не передал —
+        #        подсовываем тот же ssl_ctx
+        _orig_conn_init = aiohttp.TCPConnector.__init__
+
+        def _patched_conn_init(self, *args, **kwargs):
+            kwargs.setdefault('ssl', ssl_ctx)
+            _orig_conn_init(self, *args, **kwargs)
+
+        aiohttp.TCPConnector.__init__ = _patched_conn_init
+
+    # def apply_ssl_patch(self):
+    #     # Создаем SSL-контекст с отключенной проверкой сертификатов
+    #     ssl_context = ssl.create_default_context()
+    #     ssl_context.check_hostname = False
+    #     ssl_context.verify_mode = ssl.CERT_NONE
+    #
+    #     # Переопределяем оригинальный метод ClientSession
+    #     _original_init = aiohttp.ClientSession.__init__
+    #
+    #     def _patched_init(self, *args, **kwargs):
+    #         if 'connector' not in kwargs:
+    #             kwargs['connector'] = aiohttp.TCPConnector(ssl=ssl_context)
+    #         _original_init(self, *args, **kwargs)
+    #
+    #     aiohttp.ClientSession.__init__ = _patched_init
 
     async def _check_connection(self):
         url = f"https://iss.moex.com/iss/engines.json"

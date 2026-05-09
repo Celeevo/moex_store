@@ -4,4 +4,3 @@ venv/
 /dist/
 /moex_store.egg-info/
 /moex_store/__pycache__/
-/tests/

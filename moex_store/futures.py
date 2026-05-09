@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import webbrowser
 # from threading import active_count
 
@@ -16,6 +18,198 @@ class MOEXConnectionError(Exception):
 class Futures:
     def __init__(self, parent):
         self.parent = parent  # Ссылка на родительский класс, если нужно
+        self._metadata_cache = None
+        self._history_stat_cache = {}
+        self._normalized_history_cache = {}
+
+    @staticmethod
+    def _metadata_cache_path():
+        return os.path.join("files_from_moex", "futures_metadata.json")
+
+    def _load_metadata_cache(self):
+        if self._metadata_cache is not None:
+            return self._metadata_cache
+
+        cache_path = self._metadata_cache_path()
+        if not os.path.isfile(cache_path):
+            self._metadata_cache = {}
+            return {}
+
+        try:
+            with open(cache_path, "r", encoding="utf-8") as file:
+                self._metadata_cache = json.load(file)
+                return self._metadata_cache
+        except (OSError, json.JSONDecodeError):
+            self._metadata_cache = {}
+            return {}
+
+    def _save_metadata_cache(self, cache):
+        if not getattr(self.parent, "wtf", False):
+            self._metadata_cache = cache
+            return
+
+        cache_path = self._metadata_cache_path()
+        cache_dir = os.path.dirname(cache_path)
+        if cache_dir and not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+
+        if hasattr(self.parent, "_atomic_write_json"):
+            self.parent._atomic_write_json(cache_path, cache)
+        else:
+            with open(cache_path, "w", encoding="utf-8") as file:
+                json.dump(cache, file, ensure_ascii=False, indent=2)
+        self._metadata_cache = cache
+
+    def _get_cached_sec_info(self, sec_id):
+        if sec_id in self.parent.sec_details:
+            return self.parent.sec_details[sec_id]
+
+        if not getattr(self.parent, "rff", False):
+            return None
+
+        cache = self._load_metadata_cache()
+        return cache.get("sec_info", {}).get(sec_id)
+
+    def _set_cached_sec_info(self, sec_id, sec_info):
+        cache = self._load_metadata_cache()
+        cache.setdefault("sec_info", {})[sec_id] = sec_info
+        self._save_metadata_cache(cache)
+        if hasattr(self.parent, "_set_cached_sec_details"):
+            self.parent._set_cached_sec_details(sec_id, sec_info)
+
+    def _get_cached_history_stat(self, asset):
+        if asset in self._history_stat_cache:
+            return self._history_stat_cache[asset]
+
+        if not getattr(self.parent, "rff", False):
+            return None
+
+        cache = self._load_metadata_cache()
+        history_stat = cache.get("history_stat", {}).get(asset)
+        if history_stat:
+            self._history_stat_cache[asset] = history_stat
+        return history_stat
+
+    def _set_cached_history_stat(self, asset, history_stat):
+        self._history_stat_cache[asset] = history_stat
+        self._normalized_history_cache.pop(asset, None)
+        cache = self._load_metadata_cache()
+        cache.setdefault("history_stat", {})[asset] = history_stat
+        self._save_metadata_cache(cache)
+
+    @staticmethod
+    def _extract_valid_history_stat(stat_data):
+        return [
+            item for item in stat_data
+            if len(item) >= 7 and item[2] is not None and item[3] is not None and
+            item[1].count(item[1][:2]) == 1
+        ]
+
+    def _get_contract_context(self, sec_id, history_stat):
+        # raw_contract - реальная запись MOEX для запрошенного SECID.
+        # normalized_history - очищенная цепочка для поиска предыдущего контракта.
+        raw_contract = next((item for item in history_stat if item[0] == sec_id), None)
+        if raw_contract is None:
+            return None
+
+        asset = raw_contract[4]
+        normalized_history = self._normalized_history_cache.get(asset)
+        if normalized_history is None:
+            normalized_history = self._normalize_history_stat(history_stat)
+            self._normalized_history_cache[asset] = normalized_history
+        normalized_index = next(
+            (
+                index for index, item in enumerate(normalized_history)
+                if item[4] == raw_contract[4] and item[3] == raw_contract[3]
+            ),
+            None,
+        )
+        if normalized_index is None:
+            return None
+
+        return raw_contract, normalized_history, normalized_index
+
+    def _get_cached_contract_context(self, sec_id):
+        for history_stat in self._history_stat_cache.values():
+            context = self._get_contract_context(sec_id, history_stat)
+            if context:
+                return context
+
+        if not getattr(self.parent, "rff", False):
+            return None
+
+        cache = self._load_metadata_cache()
+        for asset, history_stat in cache.get("history_stat", {}).items():
+            self._history_stat_cache[asset] = history_stat
+            context = self._get_contract_context(sec_id, history_stat)
+            if context:
+                return context
+        return None
+
+    def _get_or_fetch_history_stat(self, asset):
+        # История фьючерсов сначала берется из futures_metadata.json.
+        # Это критично для старых контрактов и работы при недоступной MOEX.
+        cached_history_stat = self._get_cached_history_stat(asset)
+        if cached_history_stat:
+            return cached_history_stat
+
+        try:
+            stat = asyncio.run(self._get_futures_stat(asset))
+        except Exception as error:
+            cached_history_stat = self._get_cached_history_stat(asset)
+            if cached_history_stat:
+                if hasattr(self.parent, "_log"):
+                    self.parent._log(
+                        "info",
+                        f"Не удалось обновить фьючерсную историю {asset} с MOEX: {error}. "
+                        "Использую локальный futures_metadata.json..."
+                    )
+                return cached_history_stat
+            raise
+        valid_history_stat = self._extract_valid_history_stat(stat.get('series', {}).get('data', []))
+        self._set_cached_history_stat(asset, valid_history_stat)
+        return valid_history_stat
+
+    @staticmethod
+    def _contract_sort_date(item):
+        return datetime.strptime(item[3], "%Y-%m-%d")
+
+    @staticmethod
+    def _is_technical_duplicate(sec_id):
+        return bool(re.search(r"_\d{4}$", sec_id))
+
+    @staticmethod
+    def _is_calendar_spread(sec_id, asset):
+        return sec_id.count(asset) > 1
+
+    @classmethod
+    def _history_item_rank(cls, item):
+        sec_id = item[0]
+        asset = item[4]
+        return (
+            cls._is_calendar_spread(sec_id, asset),
+            cls._is_technical_duplicate(sec_id),
+        )
+
+    @classmethod
+    def _normalize_history_stat(cls, history_stat):
+        # В один expdate MOEX может вернуть обычный контракт, alias и календарный спред.
+        # Для prevexpdate оставляем один лучший вариант на каждую дату экспирации.
+        deduplicated = {}
+        for item in history_stat:
+            if len(item) < 7 or item[2] is None or item[3] is None:
+                continue
+
+            key = (item[4], item[3])
+            current = deduplicated.get(key)
+            if current is None:
+                deduplicated[key] = item
+                continue
+
+            if cls._history_item_rank(item) < cls._history_item_rank(current):
+                deduplicated[key] = item
+
+        return sorted(deduplicated.values(), key=cls._contract_sort_date, reverse=True)
 
     def get_sec_info(self, sec_id):
         '''
@@ -27,7 +221,18 @@ class Futures:
         if not isinstance(sec_id, str):
             print(f"Тикер sec_id должен быть строкой, получен тип: {type(sec_id).__name__}")
             return None
-        sec_info = asyncio.run(self.parent.get_instrument_info(sec_id))
+        cached_sec_info = self._get_cached_sec_info(sec_id)
+        if cached_sec_info:
+            self.parent.sec_details[sec_id] = cached_sec_info
+            if cached_sec_info['sectype'] != 'futures':
+                raise ValueError(f'Вызвана функция для фьючерса, но {sec_id} - это не фьючерс. Тип инструмента: '
+                                 f'{cached_sec_info["sectype"]}. Проверьте ваши инструменты.')
+            return cached_sec_info
+
+        if hasattr(self.parent, "_get_instrument_info_with_retries"):
+            sec_info = self.parent._get_instrument_info_with_retries(sec_id)
+        else:
+            sec_info = asyncio.run(self.parent.get_instrument_info(sec_id))
 
         if sec_info[-1] is None:
             raise ValueError(f"Инструмент {sec_id = } не найден на Бирже")
@@ -46,6 +251,7 @@ class Futures:
             raise ValueError(f'Вызвана функция для фьючерса, но {sec_id} - это не фьючерс. Тип инструмента: '
                              f'{self.parent.sec_details[sec_id]["sectype"]}. Проверьте ваши инструменты.')
 
+        self._set_cached_sec_info(sec_id, self.parent.sec_details[sec_id])
         return self.parent.sec_details[sec_id]
 
     def get_asset_code(self, sec_id):
@@ -123,40 +329,46 @@ class Futures:
         return c_list
 
     def get_contract_exp_date(self, sec_id):
+        cached_context = self._get_cached_contract_context(sec_id)
+        if getattr(self.parent, "rff", False) and cached_context:
+            raw_contract, _, _ = cached_context
+            return raw_contract[3]
+
         asset = self.get_asset_code(sec_id)
         if asset:
-            stat = self.get_history_stat(asset, to_active=False, show_table=False)
-            if stat:
-                exp_date = next((item[3] for item in stat if item[0] == sec_id), None)
-                if not exp_date:
-                    return None
-
-                return exp_date
+            history_stat = self._get_or_fetch_history_stat(asset)
+            context = self._get_contract_context(sec_id, history_stat)
+            if context:
+                raw_contract, _, _ = context
+                return raw_contract[3]
+            return None
 
     def get_previous_contract_exp_date(self, sec_id):
+        cached_context = self._get_cached_contract_context(sec_id)
+        if getattr(self.parent, "rff", False) and cached_context:
+            _, normalized_history, normalized_index = cached_context
+            if normalized_index + 1 >= len(normalized_history):
+                return None
+            return normalized_history[normalized_index + 1][3]
+
         asset = self.get_asset_code(sec_id)
         if asset:
-            stat = self.get_history_stat(asset, to_active=False, show_table=False)
-            if stat:
-                index = next((i for i, item in enumerate(stat) if item[0] == sec_id), None)
-                if index is None or index + 1 >= len(stat):
+            history_stat = self._get_or_fetch_history_stat(asset)
+            context = self._get_contract_context(sec_id, history_stat)
+            if context:
+                _, normalized_history, normalized_index = context
+                if normalized_index + 1 >= len(normalized_history):
                     return None
-                return stat[index + 1][3]
+                return normalized_history[normalized_index + 1][3]
+            return None
 
     def get_history_stat(self, asset, to_active=True, show_table=True):
-        stat = asyncio.run(self._get_futures_stat(asset))
-        valid_return = stat.get('series', {}).get('data', [])
-        # Биржа отдает в качестве ответа список списков, каждый вложенный список имеет вид:
-        # ['secid', 'name', 'start_date', 'expiration_date', 'asset_code', 'underlying_asset', 'is_traded']
-        # Возвращаю список, у которого вложенные списки будут такие же, но при условии, что 'start_date' не
-        # равно None, 'expiration_date' не равно None, и 'name' содержит свои первые 2 символа только один раз
-        # (например если 'name' = "SiZ4SiH5", в список не добавляю).
-        # if 'series' in stat and 'data' in stat['series'] and stat['series']['data']:
-
-        if valid_return:
-            history_stat = [item for item in stat['series']['data']
-                            if item[2] is not None and item[3] is not None and
-                            item[1].count(item[1][:2]) == 1]
+        cached_history_stat = self._get_cached_history_stat(asset)
+        if cached_history_stat:
+            history_stat = self._normalized_history_cache.get(asset)
+            if history_stat is None:
+                history_stat = self._normalize_history_stat(cached_history_stat)
+                self._normalized_history_cache[asset] = history_stat
             if to_active:
                 active_contract = self._get_active_contract(history_stat)
                 history_list = [item[0] for item in history_stat]
@@ -167,7 +379,34 @@ class Futures:
                 columns = ["secid", "shortname", "startdate", "expdate", "assetcode", "underlyingasset",
                            "is_traded"]
                 self._display_table(history_stat, columns, name="exp_dates")
-                # return None
+                return None
+            return history_stat
+
+        valid_history_stat = self._get_or_fetch_history_stat(asset)
+        valid_return = valid_history_stat
+        # Биржа отдает в качестве ответа список списков, каждый вложенный список имеет вид:
+        # ['secid', 'name', 'start_date', 'expiration_date', 'asset_code', 'underlying_asset', 'is_traded']
+        # Возвращаю список, у которого вложенные списки будут такие же, но при условии, что 'start_date' не
+        # равно None, 'expiration_date' не равно None, и 'name' содержит свои первые 2 символа только один раз
+        # (например если 'name' = "SiZ4SiH5", в список не добавляю).
+        # if 'series' in stat and 'data' in stat['series'] and stat['series']['data']:
+
+        if valid_return:
+            history_stat = self._normalized_history_cache.get(asset)
+            if history_stat is None:
+                history_stat = self._normalize_history_stat(valid_history_stat)
+                self._normalized_history_cache[asset] = history_stat
+            if to_active:
+                active_contract = self._get_active_contract(history_stat)
+                history_list = [item[0] for item in history_stat]
+                if active_contract and history_list and (active_contract in history_list):
+                    target_index = history_list.index(active_contract)
+                    history_stat = history_stat[target_index:]
+            if show_table:
+                columns = ["secid", "shortname", "startdate", "expdate", "assetcode", "underlyingasset",
+                           "is_traded"]
+                self._display_table(history_stat, columns, name="exp_dates")
+                return None
             else:
                 return history_stat
         print(f"Биржа не вернула статистику по коду базового актива {asset}. Проверьте его.")
@@ -237,19 +476,64 @@ class Futures:
         print(f"Биржа не вернула информацию")
         return None
 
-    @staticmethod
-    async def _get_all_futures(session=None):
+    async def _fetch_json_once(self, session, url, required_key, context):
+        async with session.get(url) as response:
+            response.raise_for_status()
+            data = await response.json()
+
+        if not data or required_key not in data:
+            raise aiohttp.ClientPayloadError(
+                f"Пустой ответ или отсутствует блок {required_key}: {context}"
+            )
+
+        return data
+
+    async def _fetch_json_with_retries(self, url, required_key, context):
+        # Общий retry для фьючерсных справочников. Он использует те же DNS правила,
+        # что и загрузка свечей в MoexStore.
+        attempts = max(1, getattr(self.parent, "max_retries", 1))
+        retry_delay = getattr(self.parent, "retry_delay", 0)
+        last_error = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                async with self.parent._create_session() as session:
+                    return await self._fetch_json_once(session, url, required_key, context)
+            except Exception as error:
+                if not self.parent._is_retryable_moex_error(error):
+                    raise
+                last_error = error
+                if self.parent._try_dns_fallback(error):
+                    continue
+                if attempt == attempts:
+                    break
+                self.parent._log(
+                    "info",
+                    f"Попытка {attempt}: не удалось получить {context}. "
+                    f"Повтор через {retry_delay} сек. Ошибка: {error}"
+                )
+                await asyncio.sleep(retry_delay)
+
+        raise MOEXConnectionError(
+            f"Не удалось получить {context} за {attempts} попытки: {last_error}"
+        ) from last_error
+
+    async def _get_all_futures(self, session=None):
         url = f"https://iss.moex.com/iss/engines/futures/markets/forts/securities.json?iss.meta=off&nearest=1"
+        if session is None:
+            return await self._fetch_json_with_retries(url, "securities", "список активных фьючерсов")
+
+        return await self._fetch_json_once(session, url, "securities", "список активных фьючерсов")
+
         try:
-            async with session or aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    response.raise_for_status()  # Автоматически выбрасывает исключение при ошибке
-                    data = await response.json()
+            async with session.get(url) as response:
+                response.raise_for_status()  # Автоматически выбрасывает исключение при ошибке
+                data = await response.json()
 
-                    if not data or 'securities' not in data:
-                        raise ValueError(f"Пустой ответ или отсутствуют данные")
+                if not data or 'securities' not in data:
+                    raise ValueError(f"Пустой ответ или отсутствуют данные")
 
-                    return data
+                return data
 
         except aiohttp.ClientError as e:
             logging.error(f"Ошибка подключения к MOEX: {e}")
@@ -258,40 +542,46 @@ class Futures:
             logging.error(f"Ошибка получения данных: {e}")
             raise MOEXConnectionError(f"Не удалось получить данные: {e}")
 
-    @staticmethod
-    async def _get_futures_info(secid):
-            url = f"https://iss.moex.com/iss/securities/{secid}.json?iss.meta=off&iss.only=description"
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
-                        response.raise_for_status()
-                        data = await response.json()
+    async def _get_futures_info(self, secid, session=None):
+        url = f"https://iss.moex.com/iss/securities/{secid}.json?iss.meta=off&iss.only=description"
+        if session is None:
+            return await self._fetch_json_with_retries(url, "description", f"описание фьючерса {secid}")
 
-                        if not data or 'description' not in data:
-                            raise ValueError(f"Пустой ответ или отсутствуют данные")
+        return await self._fetch_json_once(session, url, "description", f"описание фьючерса {secid}")
 
-                        return data
-
-            except aiohttp.ClientError as e:
-                logging.error(f"Ошибка подключения к MOEX: {e}")
-                raise MOEXConnectionError(f"Не удалось подключиться к MOEX: {e}")
-            except Exception as e:
-                logging.error(f"Ошибка получения данных: {e}")
-                raise MOEXConnectionError(f"Не удалось получить данные: {e}")
-
-    @staticmethod
-    async def _get_futures_stat(asset, session=None):
-        url = f"https://iss.moex.com/iss/statistics/engines/futures/markets/forts/series.json?iss.meta=off&asset_code={asset}&show_expired=1"
         try:
-            async with session or aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    response.raise_for_status()  # Автоматически выбрасывает исключение при ошибке
-                    data = await response.json()
+            async with session.get(url) as response:
+                response.raise_for_status()
+                data = await response.json()
 
-                    if not data or 'series' not in data:
-                        raise ValueError(f"Пустой ответ или отсутствуют данные для актива {asset}")
+                if not data or 'description' not in data:
+                    raise ValueError(f"Пустой ответ или отсутствуют данные")
 
-                    return data
+                return data
+
+        except aiohttp.ClientError as e:
+            logging.error(f"Ошибка подключения к MOEX: {e}")
+            raise MOEXConnectionError(f"Не удалось подключиться к MOEX: {e}")
+        except Exception as e:
+            logging.error(f"Ошибка получения данных: {e}")
+            raise MOEXConnectionError(f"Не удалось получить данные: {e}")
+
+    async def _get_futures_stat(self, asset, session=None):
+        url = f"https://iss.moex.com/iss/statistics/engines/futures/markets/forts/series.json?iss.meta=off&asset_code={asset}&show_expired=1"
+        if session is None:
+            return await self._fetch_json_with_retries(url, "series", f"историю фьючерсов {asset}")
+
+        return await self._fetch_json_once(session, url, "series", f"историю фьючерсов {asset}")
+
+        try:
+            async with session.get(url) as response:
+                response.raise_for_status()  # Автоматически выбрасывает исключение при ошибке
+                data = await response.json()
+
+                if not data or 'series' not in data:
+                    raise ValueError(f"Пустой ответ или отсутствуют данные для актива {asset}")
+
+                return data
 
         except aiohttp.ClientError as e:
             logging.error(f"Ошибка подключения к MOEX: {e}")

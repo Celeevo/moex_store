@@ -1,51 +1,48 @@
-import aiohttp
-from aiohttp import client_exceptions
+import asyncio
 import socket
+
+import aiohttp
 from aiomoex.client import ISSClient, ISSMoexError
 
 
 class DNS_ISSClient(ISSClient):
+    retry_attempts = 3
+    retry_delay = 1
+
     async def get(self, start=None):
-        """Загрузка данных.
+        """Load one MOEX ISS page with retries for transient network errors.
 
-        :param start:
-            Номер элемента с которого нужно загрузить данные. Используется для дозагрузки данных,
-            состоящих из нескольких блоков. При отсутствии данные загружаются с начального элемента.
-
-        :return:
-            Блок данных с отброшенной вспомогательной информацией - словарь, каждый ключ которого
-            соответствует одной из таблиц с данными. Таблицы являются списками словарей, которые напрямую
-            конвертируются в pandas.DataFrame.
-        :raises ISSMoexError:
-            Ошибка при обращении к ISS Moex.
+        DNS, SSL, IPv4 and timeouts are configured by the aiohttp session that
+        MoexStore passes into aiomoex. This wrapper must not replace the
+        session connector or return None, because aiomoex expects a dict.
         """
-        url = self._url
-        query = self._make_query(start)
-        # print(f"{datetime.now()}: DNS_ISSClient.get.url: {url}")
-        for dns_server in ['77.88.8.1', '8.8.8.8']:
-            connector = None
+        last_error = None
+        retryable_errors = (
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+            socket.gaierror,
+            OSError,
+        )
+
+        for attempt in range(1, self.retry_attempts + 1):
             try:
-                # import ssl  # start
-                # ssl_context = ssl.create_default_context()
-                # ssl_context.check_hostname = False
-                # ssl_context.verify_mode = ssl.CERT_NONE  # end
+                result = await super().get(start)
+                # aiomoex дальше ожидает словарь и падает на respond.get(...),
+                # поэтому пустой ответ MOEX переводим в явную retryable ошибку.
+                if result is None:
+                    raise aiohttp.ClientPayloadError(
+                        f"MOEX ISS returned empty response: url={self._url}, start={start}"
+                    )
+                return result
+            except ISSMoexError:
+                raise
+            except retryable_errors as error:
+                last_error = error
+                if attempt == self.retry_attempts:
+                    break
+                await asyncio.sleep(self.retry_delay * attempt)
 
-                resolver = aiohttp.resolver.AsyncResolver(nameservers=[dns_server])
-                connector = aiohttp.TCPConnector(resolver=resolver)  # , ssl=ssl_context
-                self._session._connector = connector
-                async with self._session.get(url, params=query) as response:
-                    try:
-                        response.raise_for_status()
-                    except client_exceptions.ClientResponseError as err:
-                        raise ISSMoexError("Неверный url", result.url) from err
-                    else:
-                        result = await response.json()
-                        return result[1]
-            except (aiohttp.ClientError, socket.gaierror) as e:
-                print(f"Failed to make a request to '{url}' using DNS server '{dns_server}'. Error: {e}")
-                continue
-            finally:
-                if connector and not connector.closed:
-                    await connector.close()
-        return None
-
+        raise ISSMoexError(
+            f"MOEX request failed after {self.retry_attempts} attempts: "
+            f"url={self._url}, start={start}, error={last_error}"
+        ) from last_error
